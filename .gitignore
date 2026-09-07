@@ -8,3 +8,4 @@ build/
 coverage/
 .turbo/
 *.tsbuildinfo
+tsconfig.build.tsbuildinfo
