@@ -7,7 +7,7 @@ export class AppController {
 
   @Get()
   getHello(): string {
-    throw new Error('test unexpected error');
+    // throw new Error('test unexpected error');
     return this.appService.getHello();
   }
 }

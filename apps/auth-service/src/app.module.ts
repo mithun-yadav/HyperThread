@@ -4,6 +4,8 @@ import { AppService } from './app.service';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import {envValidationSchema} from './config/env.validation';
 import {LoggerModule} from "nestjs-pino";
+import {randomUUID} from 'node:crypto';
+import {Request, Response} from "express"
 
 @Module({
   imports: [
@@ -29,7 +31,16 @@ import {LoggerModule} from "nestjs-pino";
                 options: {
                   colorize: true,
                 },
-              } : undefined
+              } : undefined,
+              genReqId:(req:Request, res:Response)=> {
+                const incomingId = req.headers['x-request-id'];
+
+                const requestId = typeof incomingId === 'string' && incomingId.length > 0 ? incomingId : randomUUID();
+
+                res.setHeader('x-request-id', requestId);
+
+                return requestId;
+              }
           }
         }
       }
