@@ -6,6 +6,7 @@ import {envValidationSchema} from './config/env.validation';
 import {LoggerModule} from "nestjs-pino";
 import {randomUUID} from 'node:crypto';
 import {Request, Response} from "express"
+import { HealthModule } from './health/health.module';
 
 @Module({
   imports: [
@@ -13,6 +14,7 @@ import {Request, Response} from "express"
       isGlobal: true,
       validationSchema: envValidationSchema
     }),
+    HealthModule,
     LoggerModule.forRootAsync({
       inject: [ConfigService],
       useFactory: (configService: ConfigService) =>{
