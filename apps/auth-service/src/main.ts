@@ -9,7 +9,8 @@ import {DocumentBuilder, SwaggerModule} from '@nestjs/swagger';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
-    const configService = app.get(ConfigService);
+  app.enableShutdownHooks();
+  const configService = app.get(ConfigService);
 
   app.useGlobalPipes(
     new ValidationPipe({
@@ -34,7 +35,7 @@ async function bootstrap() {
   }
    app.enableCors({
     origin: configService.get<string>('FRONTEND_URL'),
-    credentials: true
+    credentials: true,
   });
   await app.listen(configService.get<number>('PORT') ?? 3000)
 }
