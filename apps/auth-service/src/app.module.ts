@@ -7,6 +7,7 @@ import {LoggerModule} from "nestjs-pino";
 import {randomUUID} from 'node:crypto';
 import {Request, Response} from "express"
 import { HealthModule } from './health/health.module';
+import { PrismaModule } from './prisma/prisma.module';
 
 @Module({
   imports: [
@@ -14,6 +15,7 @@ import { HealthModule } from './health/health.module';
       isGlobal: true,
       validationSchema: envValidationSchema
     }),
+    PrismaModule,
     HealthModule,
     LoggerModule.forRootAsync({
       inject: [ConfigService],
