@@ -8,6 +8,7 @@ import {randomUUID} from 'node:crypto';
 import {Request, Response} from "express"
 import { HealthModule } from './health/health.module';
 import { PrismaModule } from './prisma/prisma.module';
+import { AuthModule } from './auth/auth.module';
 
 @Module({
   imports: [
@@ -48,7 +49,8 @@ import { PrismaModule } from './prisma/prisma.module';
           }
         }
       }
-    })
+    }),
+    AuthModule
   ],
   controllers: [AppController],
   providers: [AppService],
