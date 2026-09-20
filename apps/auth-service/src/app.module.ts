@@ -6,6 +6,9 @@ import {envValidationSchema} from './config/env.validation';
 import {LoggerModule} from "nestjs-pino";
 import {randomUUID} from 'node:crypto';
 import {Request, Response} from "express"
+import { HealthModule } from './health/health.module';
+import { PrismaModule } from './prisma/prisma.module';
+import { AuthModule } from './auth/auth.module';
 
 @Module({
   imports: [
@@ -13,6 +16,8 @@ import {Request, Response} from "express"
       isGlobal: true,
       validationSchema: envValidationSchema
     }),
+    PrismaModule,
+    HealthModule,
     LoggerModule.forRootAsync({
       inject: [ConfigService],
       useFactory: (configService: ConfigService) =>{
@@ -44,7 +49,8 @@ import {Request, Response} from "express"
           }
         }
       }
-    })
+    }),
+    AuthModule
   ],
   controllers: [AppController],
   providers: [AppService],
