@@ -1,8 +1,9 @@
-import { ConflictException, Injectable } from '@nestjs/common';
+import { ConflictException, Injectable, UnauthorizedException } from '@nestjs/common';
 import argon2 from 'argon2';
 import { PrismaService } from '../prisma/prisma.service';
 import { RegisterDto } from './dto/register.dto';
 import { Prisma } from '../generated/prisma/client';
+import { LoginDto } from './dto/login.dto';
 
 @Injectable()
 export class AuthService {
@@ -83,4 +84,47 @@ export class AuthService {
       throw error;
     }
   }
+
+  async login(loginDto: LoginDto){
+    const identifier = loginDto.identifier.toLowerCase();
+    const password = loginDto.password;
+
+    const identity = await this.prisma.identity.findFirst({
+      where: {
+        OR: [
+          {
+            email: identifier,
+          },
+          {
+            user:{
+              username: identifier,
+            }
+          }
+        ]
+      },
+      include:{
+        user:true
+      }
+    })
+  if(!identity){
+    throw new UnauthorizedException({
+      message:'Invalid Credentials',
+      errorCode: 'AUTH_INVALID_CREDENTIALS',
+    })
+  }
+  const isPasswordValid = await argon2.verify(
+    identity.passwordHash,
+    password
+  )
+  if(!isPasswordValid){
+    throw new UnauthorizedException({
+      message: 'Invalid credentials',
+      errorCode: 'AUTH_INVALID_CREDENTIALS'
+    });
+  }
+  return {
+    userId:identity.userId,
+    username: identity.user.username,
+  }
+}
 }
