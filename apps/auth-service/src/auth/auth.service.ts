@@ -1,13 +1,23 @@
-import { ConflictException, Injectable, UnauthorizedException } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  UnauthorizedException,
+} from '@nestjs/common';
 import argon2 from 'argon2';
 import { PrismaService } from '../prisma/prisma.service';
 import { RegisterDto } from './dto/register.dto';
 import { Prisma } from '../generated/prisma/client';
 import { LoginDto } from './dto/login.dto';
+import { ConfigService } from '@nestjs/config';
+import { JwtService } from '@nestjs/jwt';
 
 @Injectable()
 export class AuthService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly jwtService: JwtService,
+    private readonly configService: ConfigService,
+  ) {}
 
   async register(registerDto: RegisterDto) {
     const username = registerDto.username.toLowerCase();
@@ -67,13 +77,13 @@ export class AuthService {
             message: 'Username is already in use',
             errorCode: 'AUTH_USERNAME_ALREADY_EXISTS',
           });
-        };
+        }
 
-        if(target?.includes('email')){
-            throw new ConflictException({
-                message: 'Email is already in use',
-                errorCode: 'AUTH_EMAIL_ALREADY_EXISTS',
-            });
+        if (target?.includes('email')) {
+          throw new ConflictException({
+            message: 'Email is already in use',
+            errorCode: 'AUTH_EMAIL_ALREADY_EXISTS',
+          });
         }
 
         throw new ConflictException({
@@ -85,7 +95,7 @@ export class AuthService {
     }
   }
 
-  async login(loginDto: LoginDto){
+  async login(loginDto: LoginDto) {
     const identifier = loginDto.identifier.toLowerCase();
     const password = loginDto.password;
 
@@ -96,35 +106,67 @@ export class AuthService {
             email: identifier,
           },
           {
-            user:{
+            user: {
               username: identifier,
-            }
-          }
-        ]
+            },
+          },
+        ],
       },
-      include:{
-        user:true
-      }
-    })
-  if(!identity){
-    throw new UnauthorizedException({
-      message:'Invalid Credentials',
-      errorCode: 'AUTH_INVALID_CREDENTIALS',
-    })
-  }
-  const isPasswordValid = await argon2.verify(
-    identity.passwordHash,
-    password
-  )
-  if(!isPasswordValid){
-    throw new UnauthorizedException({
-      message: 'Invalid credentials',
-      errorCode: 'AUTH_INVALID_CREDENTIALS'
+      include: {
+        user: true,
+      },
     });
+    if (!identity) {
+      throw new UnauthorizedException({
+        message: 'Invalid Credentials',
+        errorCode: 'AUTH_INVALID_CREDENTIALS',
+      });
+    }
+    const isPasswordValid = await argon2.verify(
+      identity.passwordHash,
+      password,
+    );
+    if (!isPasswordValid) {
+      throw new UnauthorizedException({
+        message: 'Invalid credentials',
+        errorCode: 'AUTH_INVALID_CREDENTIALS',
+      });
+    }
+
+    const accessToken = this.jwtService.sign({
+      sub: identity.userId
+    },{
+      secret: this.configService.getOrThrow<string>('JWT_ACCESS_SECRET'),
+      expiresIn:'15m' 
+    });
+
+    const refreshToken = this.jwtService.sign({
+      sub: identity.userId
+    },{
+      secret: this.configService.getOrThrow<string>('JWT_REFRESH_SECRET'),
+      expiresIn:'7d' 
+    });
+
+    const refreshTokenHash = await argon2.hash(refreshToken, {
+      type: argon2.argon2id
+    })
+
+    const expiresAt = new Date();
+    expiresAt.setDate(expiresAt.getDate() + 7);
+
+    await this.prisma.session.create({
+      data: {
+        userId: identity.userId,
+        refreshTokenHash,
+        expiresAt
+      }
+    });
+
+    return {
+      userId: identity.userId,
+      username: identity.user.username,
+      accessToken,
+      refreshToken
+    };
   }
-  return {
-    userId:identity.userId,
-    username: identity.user.username,
-  }
-}
 }
