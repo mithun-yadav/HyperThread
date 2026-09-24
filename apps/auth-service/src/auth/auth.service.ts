@@ -133,12 +133,15 @@ export class AuthService {
       });
     }
 
-    const accessToken = this.jwtService.sign({
-      sub: identity.userId
-    },{
-      secret: this.configService.getOrThrow<string>('JWT_ACCESS_SECRET'),
-      expiresIn:'15m' 
-    });
+    const accessToken = this.jwtService.sign(
+      {
+        sub: identity.userId,
+      },
+      {
+        secret: this.configService.getOrThrow<string>('JWT_ACCESS_SECRET'),
+        expiresIn: '15m',
+      },
+    );
 
     const expiresAt = new Date();
     expiresAt.setDate(expiresAt.getDate() + 7);
@@ -147,36 +150,138 @@ export class AuthService {
       data: {
         userId: identity.userId,
         refreshTokenHash: '',
-        expiresAt
-      }
+        expiresAt,
+      },
     });
 
-    const refreshToken = this.jwtService.sign({
-      sub: identity.userId,
-      sessionId: session.id
-    },{
-      secret: this.configService.getOrThrow<string>('JWT_REFRESH_SECRET'),
-      expiresIn:'7d' 
-    });
+    const refreshToken = this.jwtService.sign(
+      {
+        sub: identity.userId,
+        sessionId: session.id,
+      },
+      {
+        secret: this.configService.getOrThrow<string>('JWT_REFRESH_SECRET'),
+        expiresIn: '7d',
+      },
+    );
 
     const refreshTokenHash = await argon2.hash(refreshToken, {
-      type: argon2.argon2id
+      type: argon2.argon2id,
     });
 
     await this.prisma.session.update({
-      where:{
+      where: {
         id: session.id,
       },
       data: {
-        refreshTokenHash
-      }
-    })
+        refreshTokenHash,
+      },
+    });
 
     return {
       userId: identity.userId,
       username: identity.user.username,
       accessToken,
-      refreshToken
+      refreshToken,
+    };
+  }
+
+  async refresh(refreshToken: string) {
+    let payload: {
+      sub: string;
+      sessionId: string;
+    };
+
+    try {
+      payload = this.jwtService.verify<{
+        sub: string;
+        sessionId: string;
+      }>(refreshToken, {
+        secret: this.configService.getOrThrow<string>('JWT_REFRESH_SECRET'),
+      });
+    } catch {
+      throw new UnauthorizedException({
+        message: 'Invalid or expired refresh token',
+        errorCode: 'AUTH_INVALID_REFRESH_TOKEN',
+      });
+    }
+    const session = await this.prisma.session.findUnique({
+      where: {
+        id: payload.sessionId,
+      },
+    });
+    if (!session) {
+      throw new UnauthorizedException({
+        message: 'Invalid refresh session',
+        errorCode: 'AUTH_SESSION_REFRESH_TOKEN',
+      });
+    }
+    if (session.revokedAt) {
+      throw new UnauthorizedException({
+        message: 'Refresh session has been revoked',
+        errorcode: 'AUTH_SESSION_REVOKED',
+      });
+    }
+    if (session.expiresAt <= new Date()) {
+      throw new UnauthorizedException({
+        message: 'Refresh has expired',
+        errorCOde: 'AUTH_SESSION_EXPIRED',
+      });
+    }
+    const tokenValid = await argon2.verify(
+      session.refreshTokenHash,
+      refreshToken,
+    );
+    if (!tokenValid) {
+      await this.prisma.session.update({
+        where: {
+          id: session.id,
+        },
+        data: {
+          revokedAt: new Date(),
+        },
+      });
+      throw new UnauthorizedException({
+        message: 'invalid refresh token',
+        errorCode: 'AUTH_REFRESH_TOKEN_REUSE',
+      });
+    }
+
+    const accessToken = this.jwtService.sign(
+      {
+        sub: payload.sub,
+      },
+      {
+        secret: this.configService.getOrThrow<string>('JWT_REFRESH_SECRET'),
+      },
+    );
+    const newRefreshToken = this.jwtService.sign(
+      {
+        sub: payload.sub,
+        sessionId: payload.sessionId,
+      },
+      {
+        secret: this.configService.getOrThrow<string>('JWT_REFRESH_SECRET'),
+        expiresIn: '7d',
+      },
+    );
+
+    const newRefreshTokenHash = await argon2.hash(newRefreshToken, {
+      type: argon2.argon2id,
+    });
+
+    await this.prisma.session.update({
+      where: {
+        id: session.id,
+      },
+      data: {
+        refreshTokenHash: newRefreshTokenHash,
+      },
+    });
+
+    return {
+      accessToken,
+      refreshToken: newRefreshToken,
     };
   }
 }
