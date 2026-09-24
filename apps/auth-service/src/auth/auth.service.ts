@@ -140,8 +140,20 @@ export class AuthService {
       expiresIn:'15m' 
     });
 
+    const expiresAt = new Date();
+    expiresAt.setDate(expiresAt.getDate() + 7);
+
+    const session = await this.prisma.session.create({
+      data: {
+        userId: identity.userId,
+        refreshTokenHash: '',
+        expiresAt
+      }
+    });
+
     const refreshToken = this.jwtService.sign({
-      sub: identity.userId
+      sub: identity.userId,
+      sessionId: session.id
     },{
       secret: this.configService.getOrThrow<string>('JWT_REFRESH_SECRET'),
       expiresIn:'7d' 
@@ -149,18 +161,16 @@ export class AuthService {
 
     const refreshTokenHash = await argon2.hash(refreshToken, {
       type: argon2.argon2id
-    })
-
-    const expiresAt = new Date();
-    expiresAt.setDate(expiresAt.getDate() + 7);
-
-    await this.prisma.session.create({
-      data: {
-        userId: identity.userId,
-        refreshTokenHash,
-        expiresAt
-      }
     });
+
+    await this.prisma.session.update({
+      where:{
+        id: session.id,
+      },
+      data: {
+        refreshTokenHash
+      }
+    })
 
     return {
       userId: identity.userId,
