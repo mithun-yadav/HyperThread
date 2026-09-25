@@ -213,19 +213,19 @@ export class AuthService {
     if (!session) {
       throw new UnauthorizedException({
         message: 'Invalid refresh session',
-        errorCode: 'AUTH_SESSION_REFRESH_TOKEN',
+        errorCode: 'AUTH_INVALID_REFRESH_TOKEN',
       });
     }
     if (session.revokedAt) {
       throw new UnauthorizedException({
         message: 'Refresh session has been revoked',
-        errorcode: 'AUTH_SESSION_REVOKED',
+        errorCode: 'AUTH_SESSION_REVOKED',
       });
     }
     if (session.expiresAt <= new Date()) {
       throw new UnauthorizedException({
         message: 'Refresh has expired',
-        errorCOde: 'AUTH_SESSION_EXPIRED',
+        errorCode: 'AUTH_SESSION_EXPIRED',
       });
     }
     const tokenValid = await argon2.verify(
@@ -252,7 +252,8 @@ export class AuthService {
         sub: payload.sub,
       },
       {
-        secret: this.configService.getOrThrow<string>('JWT_REFRESH_SECRET'),
+        secret: this.configService.getOrThrow<string>('JWT_ACCESS_SECRET'),
+        expiresIn: '15m'
       },
     );
     const newRefreshToken = this.jwtService.sign(
