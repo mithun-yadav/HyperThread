@@ -1,3 +1,4 @@
+import { Session } from './../../dist/generated/prisma/browser.d';
 import {
   ConflictException,
   Injectable,
@@ -283,6 +284,53 @@ export class AuthService {
     return {
       accessToken,
       refreshToken: newRefreshToken,
+    };
+  }
+
+  async logout(refreshToken: string) {
+    let payload: {
+      sub: string;
+      sessionId: string;
+    };
+
+    try {
+      payload = this.jwtService.verify<{
+        sub: string;
+        sessionId: string;
+      }>(refreshToken, {
+        secret: this.configService.getOrThrow<string>('JWT_REFRESH_SECRET'),
+      });
+    } catch {
+      throw new UnauthorizedException({
+        message: 'Invalid or expired refresh token',
+        errorCode: 'AUTH_INVALID_REFRESH_TOKEN',
+      });
+    }
+
+    const session = await this.prisma.session.findUnique({
+      where: {
+        id: payload.sessionId,
+      },
+    });
+
+    if (!session) {
+      throw new UnauthorizedException({
+        message: 'Invalid refresh session',
+        errorCode: 'AUTH_INVALID_REFRESH_TOKEN',
+      });
+    }
+
+    await this.prisma.session.update({
+      where: {
+        id: session.id,
+      },
+      data: {
+        revokedAt: new Date(),
+      },
+    });
+
+    return {
+      message: 'Logged out successfully',
     };
   }
 }
