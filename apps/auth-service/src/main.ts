@@ -31,12 +31,12 @@ async function bootstrap() {
 
     const document = SwaggerModule.createDocument(app, config);
 
-    SwaggerModule.setup('docs', app, document)
+    SwaggerModule.setup('api/docs', app, document)
   }
    app.enableCors({
     origin: configService.get<string>('FRONTEND_URL'),
     credentials: true,
   });
-  await app.listen(configService.get<number>('PORT') ?? 3000)
+  await app.listen(configService.get<number>('PORT') ?? 4000)
 }
 bootstrap();
