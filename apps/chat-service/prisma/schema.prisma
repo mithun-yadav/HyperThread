@@ -40,10 +40,11 @@ model Message {
   conversationId String
   senderId       String
   content        String
-  idempotencyKey String   @unique
+  idempotencyKey String
   createdAt      DateTime @default(now())
 
   conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
 
+  @@unique([senderId, idempotencyKey])
   @@index([conversationId])
 }

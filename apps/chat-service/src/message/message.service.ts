@@ -52,7 +52,10 @@ export class MessageService {
       ) {
         const existing = await this.prisma.message.findUnique({
           where: {
-            idempotencyKey: dto.idempotencyKey,
+            senderId_idempotencyKey: {
+              senderId: callerId,
+              idempotencyKey: dto.idempotencyKey,
+            },
           },
         });
         if (existing) {
