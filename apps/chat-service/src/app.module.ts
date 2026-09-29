@@ -9,6 +9,7 @@ import {Request, Response} from "express"
 import { HealthModule } from './health/health.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { ConversationModule } from './conversations/conversation/conversation.module';
+import { MessageModule } from './message/message.module';
 
 @Module({
   imports: [
@@ -18,6 +19,7 @@ import { ConversationModule } from './conversations/conversation/conversation.mo
     }),
     HealthModule,
     PrismaModule,
+    MessageModule,
     ConversationModule,
     LoggerModule.forRootAsync({
       inject: [ConfigService],
