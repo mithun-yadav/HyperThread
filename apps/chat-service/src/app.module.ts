@@ -5,53 +5,58 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { envValidationSchema } from './config/env.validation';
 import { LoggerModule } from 'nestjs-pino';
 import { randomUUID } from 'node:crypto';
-import {Request, Response} from "express"
+import { Request, Response } from 'express';
 import { HealthModule } from './health/health.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { ConversationModule } from './conversations/conversation/conversation.module';
 import { MessageModule } from './message/message.module';
+import { RealtimeModule } from './realtime/realtime.module';
 
 @Module({
   imports: [
     ConfigModule.forRoot({
-      isGlobal:true,
-      validationSchema:envValidationSchema
+      isGlobal: true,
+      validationSchema: envValidationSchema,
     }),
     HealthModule,
     PrismaModule,
     MessageModule,
     ConversationModule,
+    RealtimeModule,
     LoggerModule.forRootAsync({
       inject: [ConfigService],
-      useFactory: (configService: ConfigService) =>{
+      useFactory: (configService: ConfigService) => {
         const nodeEnv = configService.get<string>('NODE_ENV');
         return {
           pinoHttp: {
             redact: {
-              paths: [
-                'req.headers.cookie',
-                'req.headers.authorization'
-              ],
-              censor: '[REDACTED]'
+              paths: ['req.headers.cookie', 'req.headers.authorization'],
+              censor: '[REDACTED]',
             },
-            transport : nodeEnv === 'development' ? {
-                target: 'pino-pretty',
-                options: {
-                  colorize: true,
-                },
-              } : undefined,
-              genReqId:(req:Request, res:Response)=> {
-                const incomingId = req.headers['x-request-id'];
+            transport:
+              nodeEnv === 'development'
+                ? {
+                    target: 'pino-pretty',
+                    options: {
+                      colorize: true,
+                    },
+                  }
+                : undefined,
+            genReqId: (req: Request, res: Response) => {
+              const incomingId = req.headers['x-request-id'];
 
-                const requestId = typeof incomingId === 'string' && incomingId.length > 0 ? incomingId : randomUUID();
+              const requestId =
+                typeof incomingId === 'string' && incomingId.length > 0
+                  ? incomingId
+                  : randomUUID();
 
-                res.setHeader('x-request-id', requestId);
+              res.setHeader('x-request-id', requestId);
 
-                return requestId;
-              }
-          }
-        }
-      }
+              return requestId;
+            },
+          },
+        };
+      },
     }),
   ],
   controllers: [AppController],
