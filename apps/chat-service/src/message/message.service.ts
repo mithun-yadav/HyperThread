@@ -29,6 +29,10 @@ export class MessageService {
     return membership;
   }
 
+  async checkMemberShip(conversationId: string, callerId: string) {
+    await this.ensureMembership(conversationId, callerId);
+  }
+
   async sendMessage(
     conversationId: string,
     callerId: string,
