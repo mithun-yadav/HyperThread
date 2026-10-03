@@ -29,7 +29,7 @@ export class MessageService {
     return membership;
   }
 
-  async checkMemberShip(conversationId: string, callerId: string) {
+  async checkMembership(conversationId: string, callerId: string) {
     await this.ensureMembership(conversationId, callerId);
   }
 
@@ -41,7 +41,7 @@ export class MessageService {
     await this.ensureMembership(conversationId, callerId);
 
     try {
-      return await this.prisma.message.create({
+      const message = await this.prisma.message.create({
         data: {
           conversationId,
           senderId: callerId,
@@ -49,6 +49,11 @@ export class MessageService {
           idempotencyKey: dto.idempotencyKey,
         },
       });
+
+      return {
+        message,
+        created: true,
+      };
     } catch (error) {
       if (
         error instanceof Prisma.PrismaClientKnownRequestError &&
@@ -69,7 +74,10 @@ export class MessageService {
             existing.content === dto.content;
 
           if (isSameRequest) {
-            return existing;
+            return {
+              message: existing,
+              created: false,
+            };
           }
         }
         throw new ConflictException({

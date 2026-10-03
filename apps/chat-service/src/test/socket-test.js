@@ -1,13 +1,13 @@
 const { io } = require('socket.io-client');
+const { randomUUID } = require('crypto');
 
 const token = process.argv[2];
+const conversationId = process.argv[3];
 
 if (!token) {
   console.error('❌ Access token is required');
   process.exit(1);
 }
-
-const conversationId = 'b1e30364-2195-4863-bf60-0738615da9e1';
 
 const socket = io('http://localhost:4001', {
   auth: {
@@ -29,7 +29,13 @@ socket.on('joinedConversation', (data) => {
   console.log('✅ JOINED CONVERSATION');
   console.log(data);
 
-  socket.disconnect();
+  socket.emit('sendMessage', {
+  conversationId,
+  content: 'Hello from Socket.IO',
+  idempotencyKey: randomUUID(),
+});
+
+  // socket.disconnect();
 });
 
 socket.on('connect_error', (error) => {
@@ -44,4 +50,18 @@ socket.on('disconnect', (reason) => {
   console.log('Reason:', reason);
 
   process.exit(0);
+});
+
+socket.on('exception', (error) => {
+  console.log('❌ SOCKET EXCEPTION');
+  console.log(error);
+
+  socket.disconnect();
+});
+
+socket.on('newMessage', (message) => {
+  console.log('📨 NEW MESSAGE');
+  console.log(message);
+
+  socket.disconnect();
 });

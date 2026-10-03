@@ -1,6 +1,6 @@
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
-import { Socket } from 'socket.io';
+import { Server, Socket } from 'socket.io';
 import {
   OnGatewayConnection,
   OnGatewayDisconnect,
@@ -8,13 +8,18 @@ import {
   SubscribeMessage,
   MessageBody,
   ConnectedSocket,
+  WsException,
+  WebSocketServer,
 } from '@nestjs/websockets';
-import { Injectable } from '@nestjs/common';
+import { Injectable, ParseUUIDPipe } from '@nestjs/common';
 import { MessageService } from '../message/message.service';
+import { SendSocketMessageDto } from '../conversations/dto/send-message.dto';
 
 @Injectable()
 @WebSocketGateway({ cors: true })
 export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
+  @WebSocketServer()
+  server: Server;
   constructor(
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
@@ -51,34 +56,49 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   @SubscribeMessage('joinConversation')
+  @SubscribeMessage('joinConversation')
   async handleJoinConversation(
     @ConnectedSocket() client: Socket,
-    @MessageBody() conversationId: string,
+    @MessageBody(new ParseUUIDPipe()) conversationId: string,
   ) {
-    console.log('1️⃣ joinConversation received');
-    console.log('User:', client.data.userId);
-    console.log('Conversation:', conversationId);
+    console.log('🔎 SOCKET JOIN');
+    console.log('conversationId:', conversationId);
+    console.log('socket userId:', client.data.userId);
 
-    await this.messageService.checkMemberShip(
-      conversationId,
-      client.data.userId,
-    );
-
-    console.log('2️⃣ membership verified');
+    try {
+      await this.messageService.checkMembership(
+        conversationId,
+        client.data.userId,
+      );
+    } catch {
+      throw new WsException({
+        errorCode: 'CONVERSATION_NOT_FOUND',
+        message: 'Conversation not found',
+      });
+    }
 
     await client.join(conversationId);
 
-    console.log('3️⃣ joined room');
-
-    client.emit('joinedConversation', {
-      conversationId,
-    });
-
-    console.log('4️⃣ confirmation emitted');
-
     return {
       event: 'joinedConversation',
-      conversationId,
+      data: { conversationId },
     };
+  }
+
+  @SubscribeMessage('sendMessage')
+  async handleSendMessage(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() dto: SendSocketMessageDto,
+  ) {
+    const result = await this.messageService.sendMessage(
+      dto.conversationId,
+      client.data.userId,
+      dto,
+    );
+
+    if (result.created)
+      this.server.to(dto.conversationId).emit('newMessage', result.message);
+
+    return result.message;
   }
 }
