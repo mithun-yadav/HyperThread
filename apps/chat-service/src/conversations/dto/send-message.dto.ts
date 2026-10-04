@@ -6,6 +6,7 @@ export class SendMessageDto {
   @MaxLength(4000)
   content!: string;
 
+  @IsNotEmpty()
   @IsString()
   @IsUUID()
   idempotencyKey!: string;
@@ -18,8 +19,9 @@ export class SendSocketMessageDto {
   @IsNotEmpty()
   @IsString()
   @MaxLength(4000)
-  content: string;
+  content!: string;
 
+  @IsNotEmpty()
   @IsString()
   @IsUUID()
   idempotencyKey!: string;

@@ -47,4 +47,5 @@ model Message {
 
   @@unique([senderId, idempotencyKey])
   @@index([conversationId])
+  @@index([conversationId, createdAt, id])
 }

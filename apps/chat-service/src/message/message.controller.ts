@@ -39,6 +39,7 @@ export class MessageController {
     @Param('conversationId', new ParseUUIDPipe()) conversationId: string,
     @Req() req: Request,
     @Query('limit') limit?: string,
+    @Query('before') before?: string,
   ) {
     const parsedLimit = limit === undefined ? 50 : Number(limit);
 
@@ -54,6 +55,7 @@ export class MessageController {
       conversationId,
       req.user!.sub,
       parsedLimit,
+      before,
     );
   }
 }

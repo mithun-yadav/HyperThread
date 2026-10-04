@@ -11,12 +11,24 @@ import {
   WsException,
   WebSocketServer,
 } from '@nestjs/websockets';
-import { Injectable, ParseUUIDPipe } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  NotFoundException,
+  ParseUUIDPipe,
+  UsePipes,
+} from '@nestjs/common';
 import { MessageService } from '../message/message.service';
 import { SendSocketMessageDto } from '../conversations/dto/send-message.dto';
+import { WsValidationPipe } from '../common/pipes/ws-validation.pipe';
 
 @Injectable()
-@WebSocketGateway({ cors: true })
+@WebSocketGateway({
+  cors: {
+    origin: ['http://localhost:5000'],
+    credentials: true,
+  },
+})
 export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer()
   server: Server;
@@ -27,9 +39,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   ) {}
 
   handleConnection(client: Socket) {
-    console.log('🔌 handleConnection:', client.id);
-
-    const token = client.handshake.auth?.token ?? client.handshake.query?.token;
+    const token = client.handshake.auth?.token;
 
     if (!token || typeof token !== 'string') {
       client.disconnect();
@@ -42,20 +52,15 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       });
 
       client.data.userId = payload.sub;
-
-      console.log('✅ Socket authenticated:', client.data.userId);
     } catch {
-      console.log('❌ Socket authentication failed');
       client.disconnect();
-      return;
     }
   }
 
   handleDisconnect(client: Socket) {
-    console.log('🔌 handleDisconnect:', client.id);
+    //
   }
 
-  @SubscribeMessage('joinConversation')
   @SubscribeMessage('joinConversation')
   async handleJoinConversation(
     @ConnectedSocket() client: Socket,
@@ -85,19 +90,41 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     };
   }
 
+  @UsePipes(new WsValidationPipe())
   @SubscribeMessage('sendMessage')
   async handleSendMessage(
     @ConnectedSocket() client: Socket,
     @MessageBody() dto: SendSocketMessageDto,
   ) {
-    const result = await this.messageService.sendMessage(
-      dto.conversationId,
-      client.data.userId,
-      dto,
-    );
+    let result;
+    try {
+      result = await this.messageService.sendMessage(
+        dto.conversationId,
+        client.data.userId,
+        dto,
+      );
+    } catch (error) {
+      if (error instanceof NotFoundException) {
+        throw new WsException({
+          errorCode: 'CONVERSATION_NOT_FOUND',
+          message: 'Conversation not found',
+        });
+      }
+      if (error instanceof ConflictException) {
+        throw new WsException({
+          errorCode: 'IDEMPOTENCY_KEY_REUSED',
+          message: 'Idempotency key was already used for different request',
+        });
+      }
+      throw new WsException({
+        errorCode: 'INTERNAL_ERROR',
+        message: 'Something went wrong',
+      });
+    }
 
-    if (result.created)
+    if (result.created) {
       this.server.to(dto.conversationId).emit('newMessage', result.message);
+    }
 
     return result.message;
   }

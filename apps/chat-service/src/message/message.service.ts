@@ -93,14 +93,70 @@ export class MessageService {
     conversationId: string,
     callerId: string,
     limit: number = 50,
+    before?: string,
   ) {
     await this.ensureMembership(conversationId, callerId);
+    let cursorMessage;
+    if (before) {
+      cursorMessage = await this.prisma.message.findFirst({
+        where: {
+          id: before,
+          conversationId,
+        },
+        select: {
+          id: true,
+          createdAt: true,
+        },
+      });
+      if (!cursorMessage) {
+        throw new NotFoundException({
+          message: 'Message not found',
+          errorCode: 'MESSAGE_NOT_FOUND',
+        });
+      }
+    }
 
     const messages = await this.prisma.message.findMany({
-      where: { conversationId },
-      orderBy: { createdAt: 'desc' },
-      take: limit,
+      where: {
+        conversationId,
+        ...(cursorMessage && {
+          OR: [
+            {
+              createdAt: {
+                lt: cursorMessage.createdAt,
+              },
+            },
+            {
+              createdAt: cursorMessage.createdAt,
+              id: {
+                lt: cursorMessage.id,
+              },
+            },
+          ],
+        }),
+      },
+      orderBy: [
+        {
+          createdAt: 'desc',
+        },
+        {
+          id: 'desc',
+        },
+      ],
+      take: limit + 1,
     });
-    return messages.reverse();
+
+    const hasMore = messages.length > limit;
+
+    if (hasMore) {
+      messages.pop();
+    }
+
+    messages.reverse();
+    return {
+      messages,
+      hasMore,
+      nextBefore: hasMore ? messages[0]?.id : null,
+    };
   }
 }
