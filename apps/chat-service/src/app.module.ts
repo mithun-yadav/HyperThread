@@ -11,6 +11,7 @@ import { PrismaModule } from './prisma/prisma.module';
 import { ConversationModule } from './conversations/conversation/conversation.module';
 import { MessageModule } from './message/message.module';
 import { RealtimeModule } from './realtime/realtime.module';
+import { RedisModule } from './redis/redis.moudule';
 
 @Module({
   imports: [
@@ -18,6 +19,7 @@ import { RealtimeModule } from './realtime/realtime.module';
       isGlobal: true,
       validationSchema: envValidationSchema,
     }),
+    RedisModule,
     HealthModule,
     PrismaModule,
     MessageModule,

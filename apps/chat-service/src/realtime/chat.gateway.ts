@@ -1,6 +1,7 @@
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { Server, Socket } from 'socket.io';
+import { RedisService } from '../redis/redis.service';
 import {
   OnGatewayConnection,
   OnGatewayDisconnect,
@@ -21,6 +22,7 @@ import {
 import { MessageService } from '../message/message.service';
 import { SendSocketMessageDto } from '../conversations/dto/send-message.dto';
 import { WsValidationPipe } from '../common/pipes/ws-validation.pipe';
+import { subscribe } from 'diagnostics_channel';
 
 @Injectable()
 @WebSocketGateway({
@@ -36,9 +38,10 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
     private readonly messageService: MessageService,
+    private readonly redisService: RedisService,
   ) {}
 
-  handleConnection(client: Socket) {
+  async handleConnection(client: Socket) {
     const token = client.handshake.auth?.token;
 
     if (!token || typeof token !== 'string') {
@@ -52,13 +55,19 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       });
 
       client.data.userId = payload.sub;
+
+      await this.redisService.setSocketPresence(client.data.userId, client.id);
     } catch {
       client.disconnect();
     }
   }
 
-  handleDisconnect(client: Socket) {
-    //
+  async handleDisconnect(client: Socket) {
+    if (!client.data.userId) {
+      return;
+    }
+
+    await this.redisService.removeSocketPresence(client.data.userId, client.id);
   }
 
   @SubscribeMessage('joinConversation')
@@ -128,5 +137,26 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     return result.message;
   }
+
+  @SubscribeMessage('heartbeat')
+  async handleHeart(@ConnectedSocket() client: Socket) {
+    if (!client.data.userId) {
+      throw new WsException({
+        errorCode: 'UNAUTHORIZE',
+        message: 'Unauthorized',
+      });
+    }
+
+    await this.redisService.refreshSocketPresence(
+      client.data.userId,
+      client.id,
+    );
+
+    return {
+      event: 'heartbeat'
+      data: {
+        status: 'ok'
+      }
+    }
+  }
 }
-//
