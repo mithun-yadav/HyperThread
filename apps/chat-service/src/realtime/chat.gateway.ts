@@ -139,10 +139,10 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   @SubscribeMessage('heartbeat')
-  async handleHeart(@ConnectedSocket() client: Socket) {
+  async handleHeartbeat(@ConnectedSocket() client: Socket) {
     if (!client.data.userId) {
       throw new WsException({
-        errorCode: 'UNAUTHORIZE',
+        errorCode: 'UNAUTHORIZED',
         message: 'Unauthorized',
       });
     }
@@ -153,10 +153,10 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     );
 
     return {
-      event: 'heartbeat'
+      event: 'heartbeat',
       data: {
-        status: 'ok'
-      }
-    }
+        status: 'ok',
+      },
+    };
   }
 }
