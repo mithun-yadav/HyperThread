@@ -75,9 +75,9 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @ConnectedSocket() client: Socket,
     @MessageBody(new ParseUUIDPipe()) conversationId: string,
   ) {
-    console.log('🔎 SOCKET JOIN');
-    console.log('conversationId:', conversationId);
-    console.log('socket userId:', client.data.userId);
+    // console.log('🔎 SOCKET JOIN');
+    // console.log('conversationId:', conversationId);
+    // console.log('socket userId:', client.data.userId);
 
     try {
       await this.messageService.checkMembership(
@@ -140,24 +140,31 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   @SubscribeMessage('heartbeat')
   async handleHeartbeat(@ConnectedSocket() client: Socket) {
-    console.log('HEARTBEAT RECEIVED:', client.id);
-    if (!client.data.userId) {
+    try {
+      console.log('HEARTBEAT RECEIVED:', client.id);
+      if (!client.data.userId) {
+        throw new WsException({
+          errorCode: 'UNAUTHORIZED',
+          message: 'Unauthorized',
+        });
+      }
+
+      await this.redisService.refreshSocketPresence(
+        client.data.userId,
+        client.id,
+      );
+
+      return {
+        event: 'heartbeat',
+        data: {
+          status: 'ok',
+        },
+      };
+    } catch {
       throw new WsException({
-        errorCode: 'UNAUTHORIZED',
-        message: 'Unauthorized',
+        errorCode: 'INTERNAL_ERROR',
+        message: 'Something went wrong',
       });
     }
-
-    await this.redisService.refreshSocketPresence(
-      client.data.userId,
-      client.id,
-    );
-
-    return {
-      event: 'heartbeat',
-      data: {
-        status: 'ok',
-      },
-    };
   }
 }

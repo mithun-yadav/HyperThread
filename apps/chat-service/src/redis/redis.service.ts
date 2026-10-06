@@ -22,32 +22,46 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
     return this.client;
   }
 
+  private getUserSocketsKey(userId: string) {
+    return `presence:${userId}:sockets`;
+  }
+
   async setSocketPresence(userId: string, socketId: string) {
     const key = `presence:${userId}:socket:${socketId}`;
+    const socketsKey = this.getUserSocketsKey(userId);
+    const expiresAt = Math.floor(Date.now() / 1000) + 30;
 
     await this.client.set(key, '1', 'EX', 30);
+
+    await this.client.zadd(socketsKey, expiresAt, socketId);
   }
 
   async refreshSocketPresence(userId: string, socketId: string) {
     const key = `presence:${userId}:socket:${socketId}`;
+    const socketsKey = this.getUserSocketsKey(userId);
+    const expiresAt = Math.floor(Date.now() / 1000) + 30;
 
-    const before = await this.client.ttl(key);
+    await this.client.expire(key, 30);
 
-    const result = await this.client.expire(key, 30);
-
-    const after = await this.client.ttl(key);
-
-    console.log('HEARTBEAT REDIS:', {
-      key,
-      before,
-      expireResult: result,
-      after,
-    });
+    await this.client.zadd(socketsKey, expiresAt, socketId);
   }
 
   async removeSocketPresence(userId: string, socketId: string) {
     const key = `presence:${userId}:socket:${socketId}`;
+    const socketsKey = this.getUserSocketsKey(userId);
 
     await this.client.del(key);
+
+    await this.client.zrem(socketsKey, socketId);
+  }
+
+  async isUserOnline(userId: string): Promise<boolean> {
+    const socketsKey = this.getUserSocketsKey(userId);
+    const now = Math.floor(Date.now() / 1000);
+
+    await this.client.zremrangebyscore(socketsKey, '-inf', now);
+
+    const activeSockets = await this.client.zcard(socketsKey);
+    return activeSockets > 0;
   }
 }
