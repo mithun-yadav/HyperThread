@@ -140,6 +140,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   @SubscribeMessage('heartbeat')
   async handleHeartbeat(@ConnectedSocket() client: Socket) {
+    console.log('HEARTBEAT RECEIVED:', client.id);
     if (!client.data.userId) {
       throw new WsException({
         errorCode: 'UNAUTHORIZED',

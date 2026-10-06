@@ -31,7 +31,18 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
   async refreshSocketPresence(userId: string, socketId: string) {
     const key = `presence:${userId}:socket:${socketId}`;
 
-    await this.client.expire(key, 30);
+    const before = await this.client.ttl(key);
+
+    const result = await this.client.expire(key, 30);
+
+    const after = await this.client.ttl(key);
+
+    console.log('HEARTBEAT REDIS:', {
+      key,
+      before,
+      expireResult: result,
+      after,
+    });
   }
 
   async removeSocketPresence(userId: string, socketId: string) {
