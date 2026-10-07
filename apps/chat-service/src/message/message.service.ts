@@ -29,6 +29,10 @@ export class MessageService {
     return membership;
   }
 
+  async checkMembership(conversationId: string, callerId: string) {
+    await this.ensureMembership(conversationId, callerId);
+  }
+
   async sendMessage(
     conversationId: string,
     callerId: string,
@@ -37,7 +41,7 @@ export class MessageService {
     await this.ensureMembership(conversationId, callerId);
 
     try {
-      return await this.prisma.message.create({
+      const message = await this.prisma.message.create({
         data: {
           conversationId,
           senderId: callerId,
@@ -45,6 +49,11 @@ export class MessageService {
           idempotencyKey: dto.idempotencyKey,
         },
       });
+
+      return {
+        message,
+        created: true,
+      };
     } catch (error) {
       if (
         error instanceof Prisma.PrismaClientKnownRequestError &&
@@ -52,7 +61,10 @@ export class MessageService {
       ) {
         const existing = await this.prisma.message.findUnique({
           where: {
-            idempotencyKey: dto.idempotencyKey,
+            senderId_idempotencyKey: {
+              senderId: callerId,
+              idempotencyKey: dto.idempotencyKey,
+            },
           },
         });
         if (existing) {
@@ -62,7 +74,10 @@ export class MessageService {
             existing.content === dto.content;
 
           if (isSameRequest) {
-            return existing;
+            return {
+              message: existing,
+              created: false,
+            };
           }
         }
         throw new ConflictException({
@@ -78,14 +93,70 @@ export class MessageService {
     conversationId: string,
     callerId: string,
     limit: number = 50,
+    before?: string,
   ) {
     await this.ensureMembership(conversationId, callerId);
+    let cursorMessage;
+    if (before) {
+      cursorMessage = await this.prisma.message.findFirst({
+        where: {
+          id: before,
+          conversationId,
+        },
+        select: {
+          id: true,
+          createdAt: true,
+        },
+      });
+      if (!cursorMessage) {
+        throw new NotFoundException({
+          message: 'Message not found',
+          errorCode: 'MESSAGE_NOT_FOUND',
+        });
+      }
+    }
 
     const messages = await this.prisma.message.findMany({
-      where: { conversationId },
-      orderBy: { createdAt: 'desc' },
-      take: limit,
+      where: {
+        conversationId,
+        ...(cursorMessage && {
+          OR: [
+            {
+              createdAt: {
+                lt: cursorMessage.createdAt,
+              },
+            },
+            {
+              createdAt: cursorMessage.createdAt,
+              id: {
+                lt: cursorMessage.id,
+              },
+            },
+          ],
+        }),
+      },
+      orderBy: [
+        {
+          createdAt: 'desc',
+        },
+        {
+          id: 'desc',
+        },
+      ],
+      take: limit + 1,
     });
-    return messages.reverse();
+
+    const hasMore = messages.length > limit;
+
+    if (hasMore) {
+      messages.pop();
+    }
+
+    messages.reverse();
+    return {
+      messages,
+      hasMore,
+      nextBefore: hasMore ? messages[0]?.id : null,
+    };
   }
 }
