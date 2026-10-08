@@ -1,6 +1,8 @@
+import { RemoveConversationMemberDto } from './../dto/remove-conversation-member.dto';
 import {
   Body,
   Controller,
+  Delete,
   Get,
   NotFoundException,
   Param,
@@ -13,6 +15,7 @@ import { CreateDirectConversationDto } from '../dto/create-direct-conversation.d
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import type { Request } from 'express';
 import { CreateGroupConversationDto } from '../dto/create-group-conversation.dto';
+import { AddConversationMemberDto } from '../dto/add-conversation-member.dto';
 
 @Controller('conversations')
 @UseGuards(JwtAuthGuard)
@@ -58,5 +61,45 @@ export class ConversationController {
   ) {
     const callerId = req.user!.sub;
     return this.conversationService.createGroup(callerId, dto);
+  }
+
+  @Post(':conversationId/members')
+  async addMember(
+    @Req() req: Request,
+    @Param('conversationId') conversationId: string,
+    @Body() dto: AddConversationMemberDto,
+  ) {
+    const callerId = req.user!.sub;
+
+    return this.conversationService.addMember(
+      callerId,
+      conversationId,
+      dto.userId,
+    );
+  }
+
+  @Delete(':conversationId/members')
+  async removeMember(
+    @Req() req: Request,
+    @Param('conversationId') conversationId: string,
+    @Body() dto: RemoveConversationMemberDto,
+  ) {
+    const callerId = req.user!.sub;
+
+    return this.conversationService.removeMember(
+      callerId,
+      conversationId,
+      dto.userId,
+    );
+  }
+
+  @Delete(':conversationId/leave-group')
+  async leaveGroup(
+    @Req() req: Request,
+    @Param('conversationId') conversationId: string,
+  ) {
+    const callerId = req.user!.sub;
+
+    return this.conversationService.leaveGroup(callerId, conversationId);
   }
 }
