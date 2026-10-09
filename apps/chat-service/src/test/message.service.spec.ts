@@ -1,5 +1,6 @@
 import { ConflictException } from '@nestjs/common';
 import { MessageService } from '../message/message.service';
+import { Prisma } from '../generated/prisma/client';
 
 describe('MessageService', () => {
   let service: MessageService;
@@ -7,6 +8,7 @@ describe('MessageService', () => {
   const prisma = {
     conversationMember: {
       findUnique: jest.fn(),
+      delete: jest.fn(),
     },
     message: {
       create: jest.fn(),
@@ -33,6 +35,12 @@ describe('MessageService', () => {
     createdAt: new Date(),
   };
 
+  const createUniqueConstraintError = () =>
+    new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
+      code: 'P2002',
+      clientVersion: Prisma.prismaVersion.client,
+    });
+
   beforeEach(() => {
     prisma.conversationMember.findUnique.mockResolvedValue({
       id: 'membership-id',
@@ -58,9 +66,7 @@ describe('MessageService', () => {
   });
 
   it('returns the existing message on idempotent retry', async () => {
-    prisma.message.create.mockRejectedValue({
-      code: 'P2002',
-    });
+    prisma.message.create.mockRejectedValue(createUniqueConstraintError());
 
     prisma.message.findUnique.mockResolvedValue(message);
 
@@ -79,14 +85,24 @@ describe('MessageService', () => {
   });
 
   it('rejects reuse of an idempotency key for a different message', async () => {
-    prisma.message.create.mockRejectedValue({
-      code: 'P2002',
-    });
+    prisma.message.create.mockRejectedValue(createUniqueConstraintError());
 
     prisma.message.findUnique.mockResolvedValue({
       ...message,
       content: 'Different content',
     });
+
+    await expect(
+      service.sendMessage(conversationId, userId, {
+        content: 'Hello',
+        idempotencyKey,
+      }),
+    ).rejects.toBeInstanceOf(ConflictException);
+  });
+
+  it('rejects when no existing message is found after a unique constraint error', async () => {
+    prisma.message.create.mockRejectedValue(createUniqueConstraintError());
+    prisma.message.findUnique.mockResolvedValue(null);
 
     await expect(
       service.sendMessage(conversationId, userId, {

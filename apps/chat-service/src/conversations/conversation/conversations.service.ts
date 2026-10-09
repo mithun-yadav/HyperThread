@@ -330,4 +330,45 @@ export class ConversationService {
       message: 'You left the group successfully',
     };
   }
+
+  async renameGroup(callerId: string, conversationId: string, name: string) {
+    const conversation = await this.prisma.conversation.findFirst({
+      where: {
+        id: conversationId,
+      },
+      include: {
+        members: {
+          where: {
+            userId: callerId,
+          },
+          select: {
+            role: true,
+          },
+        },
+      },
+    });
+
+    if (!conversation) {
+      throw new NotFoundException('Conversation not found');
+    }
+
+    if (conversation.type != ConversationType.GROUP) {
+      throw new BadRequestException('Only group conversation can be renamed');
+    }
+
+    const callerMembership = conversation.members[0];
+
+    if (!callerMembership || callerMembership.role !== ConversationRole.ADMIN) {
+      throw new ForbiddenException('Only group admin can rename the group');
+    }
+
+    return this.prisma.conversation.update({
+      where: {
+        id: conversationId,
+      },
+      data: {
+        name,
+      },
+    });
+  }
 }

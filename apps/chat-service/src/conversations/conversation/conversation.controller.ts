@@ -6,6 +6,7 @@ import {
   Get,
   NotFoundException,
   Param,
+  Patch,
   Post,
   Req,
   UseGuards,
@@ -16,6 +17,7 @@ import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import type { Request } from 'express';
 import { CreateGroupConversationDto } from '../dto/create-group-conversation.dto';
 import { AddConversationMemberDto } from '../dto/add-conversation-member.dto';
+import { RenameConversationDto } from '../dto/rename-conversation.dto';
 
 @Controller('conversations')
 @UseGuards(JwtAuthGuard)
@@ -101,5 +103,20 @@ export class ConversationController {
     const callerId = req.user!.sub;
 
     return this.conversationService.leaveGroup(callerId, conversationId);
+  }
+
+  @Patch(':conversationId/name')
+  async renameGroup(
+    @Req() req: Request,
+    @Param('conversationId') conversationId: string,
+    @Body() dto: RenameConversationDto,
+  ) {
+    const callerId = req.user!.sub;
+
+    return this.conversationService.renameGroup(
+      callerId,
+      conversationId,
+      dto.name,
+    );
   }
 }
