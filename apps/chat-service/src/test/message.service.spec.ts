@@ -1,6 +1,14 @@
-import { ConflictException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  NotFoundException,
+} from '@nestjs/common';
 import { MessageService } from '../message/message.service';
-import { Prisma } from '../generated/prisma/client';
+import {
+  ConversationType,
+  MessageStatus,
+  Prisma,
+} from '../generated/prisma/client';
 
 describe('MessageService', () => {
   let service: MessageService;
@@ -13,6 +21,7 @@ describe('MessageService', () => {
     message: {
       create: jest.fn(),
       findUnique: jest.fn(),
+      updateMany: jest.fn(),
     },
   };
 
@@ -110,5 +119,100 @@ describe('MessageService', () => {
         idempotencyKey,
       }),
     ).rejects.toBeInstanceOf(ConflictException);
+  });
+
+  describe('acknowledgeDelivery', () => {
+    const recipientId = 'a0f55a23-b2cb-4b87-b1a4-a7f02b37b3d8';
+
+    const directMessage = {
+      ...message,
+      status: MessageStatus.SENT,
+      conversation: {
+        type: ConversationType.DIRECT,
+        members: [{ userId }, { userId: recipientId }],
+      },
+    };
+
+    it('marks a direct message as delivered by its recipient', async () => {
+      prisma.message.findUnique
+        .mockResolvedValueOnce(directMessage)
+        .mockResolvedValueOnce({
+          ...message,
+          status: MessageStatus.DELIVERED,
+        });
+      prisma.message.updateMany.mockResolvedValue({ count: 1 });
+
+      const result = await service.acknowledgeDelivery(message.id, recipientId);
+
+      expect(prisma.message.updateMany).toHaveBeenCalledWith({
+        where: {
+          id: message.id,
+          status: MessageStatus.SENT,
+        },
+        data: { status: MessageStatus.DELIVERED },
+      });
+      expect(result.status).toBe(MessageStatus.DELIVERED);
+    });
+
+    it('rejects the sender acknowledging their own message', async () => {
+      prisma.message.findUnique.mockResolvedValue(directMessage);
+
+      await expect(
+        service.acknowledgeDelivery(message.id, userId),
+      ).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    it('rejects a non-member', async () => {
+      prisma.message.findUnique.mockResolvedValue({
+        ...directMessage,
+        conversation: {
+          ...directMessage.conversation,
+          members: [{ userId }],
+        },
+      });
+
+      await expect(
+        service.acknowledgeDelivery(message.id, recipientId),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it('rejects acknowledgement for a group message', async () => {
+      prisma.message.findUnique.mockResolvedValue({
+        ...directMessage,
+        conversation: {
+          ...directMessage.conversation,
+          type: ConversationType.GROUP,
+        },
+      });
+
+      await expect(
+        service.acknowledgeDelivery(message.id, recipientId),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('rejects an unknown message', async () => {
+      prisma.message.findUnique.mockResolvedValue(null);
+
+      await expect(
+        service.acknowledgeDelivery(message.id, recipientId),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it('keeps an already delivered message delivered on duplicate acknowledgement', async () => {
+      prisma.message.findUnique
+        .mockResolvedValueOnce({
+          ...directMessage,
+          status: MessageStatus.DELIVERED,
+        })
+        .mockResolvedValueOnce({
+          ...message,
+          status: MessageStatus.DELIVERED,
+        });
+      prisma.message.updateMany.mockResolvedValue({ count: 0 });
+
+      const result = await service.acknowledgeDelivery(message.id, recipientId);
+
+      expect(result.status).toBe(MessageStatus.DELIVERED);
+    });
   });
 });

@@ -39,7 +39,7 @@ export class JwtAuthGuard implements CanActivate {
       request.user = payload;
 
       return true;
-    } catch (error) {
+    } catch {
       throw new UnauthorizedException({
         message: 'Invalid or expired access token',
         errorCode: 'AUTH_INVALID_ACCESS_TOKEN',

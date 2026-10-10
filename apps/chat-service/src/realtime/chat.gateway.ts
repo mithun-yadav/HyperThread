@@ -22,7 +22,6 @@ import {
 import { MessageService } from '../message/message.service';
 import { SendSocketMessageDto } from '../conversations/dto/send-message.dto';
 import { WsValidationPipe } from '../common/pipes/ws-validation.pipe';
-import { subscribe } from 'diagnostics_channel';
 
 @Injectable()
 @WebSocketGateway({
@@ -136,6 +135,60 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
 
     return result.message;
+  }
+
+  @SubscribeMessage('acknowledgeDelivery')
+  async handleAcknowledgeDelivery(
+    @ConnectedSocket() client: Socket,
+    @MessageBody(new ParseUUIDPipe()) messageId: string,
+  ) {
+    if (!client.data.userId) {
+      throw new WsException({
+        errorCode: 'UNAUTHORIZED',
+        message: 'Unauthorized',
+      });
+    }
+    try {
+      const message = await this.messageService.acknowledgeDelivery(
+        messageId,
+        client.data.userId,
+      );
+
+      // Notify client in the conversation room.
+      this.server.to(message.conversationId).emit('messageDelivered', {
+        messageId: message.id,
+        conversationId: message.conversationId,
+        senderId: message.senderId,
+        status: message.status,
+      });
+
+      return {
+        event: 'deliveryAcknowledged',
+        data: {
+          messageId: message.id,
+          status: message.status,
+        },
+      };
+    } catch (error) {
+      if (error instanceof NotFoundException) {
+        throw new WsException({
+          errorCode: 'MESSAGE_NOT_FOUND',
+          message: 'Message not found',
+        });
+      }
+
+      if (error instanceof ConflictException) {
+        throw new WsException({
+          errorCode: 'SENDER_CANNOT_ACKNOWLEDGE',
+          message: 'Sender cannot acknowledge their own message',
+        });
+      }
+
+      throw new WsException({
+        errorCode: 'DELIVERY_ACKNOWLEDGEMENT_FAILED',
+        message: 'could not acknowledge message delivery',
+      });
+    }
   }
 
   @SubscribeMessage('heartbeat')

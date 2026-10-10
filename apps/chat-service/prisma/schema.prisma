@@ -17,6 +17,11 @@ enum ConversationRole {
   MEMBER
 }
 
+enum MessageStatus {
+  SENT
+  DELIVERED
+}
+
 model Conversation {
   id        String           @id @default(uuid())
   type      ConversationType
@@ -48,6 +53,7 @@ model Message {
   senderId       String
   content        String
   idempotencyKey String
+  status MessageStatus @default(SENT)
   createdAt      DateTime @default(now())
 
   conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)

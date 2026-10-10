@@ -1,11 +1,16 @@
 import {
+  BadRequestException,
   ConflictException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { SendMessageDto } from '../conversations/dto/send-message.dto';
-import { Prisma } from '../generated/prisma/client';
+import {
+  ConversationType,
+  MessageStatus,
+  Prisma,
+} from '../generated/prisma/client';
 
 @Injectable()
 export class MessageService {
@@ -158,5 +163,74 @@ export class MessageService {
       hasMore,
       nextBefore: hasMore ? messages[0]?.id : null,
     };
+  }
+
+  async acknowledgeDelivery(messageId: string, callerId: string) {
+    const message = await this.prisma.message.findUnique({
+      where: { id: messageId },
+      include: {
+        conversation: {
+          select: {
+            type: true,
+            members: {
+              select: { userId: true },
+            },
+          },
+        },
+      },
+    });
+    if (!message) {
+      throw new NotFoundException({
+        message: 'Message not found',
+        errorCode: 'MESSAGE_NOT_FOUND',
+      });
+    }
+    if (message.conversation.type !== ConversationType.DIRECT) {
+      throw new BadRequestException({
+        message: 'Delivery acknowledgement is only supported for direct chats',
+        errorCode: 'DIRECT_CHAT_ONLY',
+      });
+    }
+
+    const isMember = message.conversation.members.some(
+      (member) => member.userId === callerId,
+    );
+
+    if (!isMember) {
+      throw new NotFoundException({
+        message: 'Message not found',
+        errorCode: 'MESSAGE_NOT_FOUND',
+      });
+    }
+
+    if (message.senderId === callerId) {
+      throw new ConflictException({
+        message: 'Senders cannot acknowledge their own message',
+        errorCode: 'SENDER_CANNOT_ACKNOWLEDGE',
+      });
+    }
+
+    await this.prisma.message.updateMany({
+      where: {
+        id: messageId,
+        status: MessageStatus.SENT,
+      },
+      data: {
+        status: MessageStatus.DELIVERED,
+      },
+    });
+
+    const updateMessage = await this.prisma.message.findUnique({
+      where: { id: messageId },
+    });
+
+    if (!updateMessage) {
+      throw new NotFoundException({
+        message: 'Message not found',
+        errorCode: 'MESSAGE_NOT_FOUND',
+      });
+    }
+
+    return updateMessage;
   }
 }
