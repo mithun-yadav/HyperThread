@@ -13,7 +13,9 @@ describe('ChatGateway', () => {
     acknowledgeDelivery: jest.fn(),
   };
 
-  const redisService = {} as RedisService;
+  const redisService = {
+    refreshSocketPresence: jest.fn(),
+  } as unknown as RedisService;
   const jwtService = {} as JwtService;
   const configService = {} as ConfigService;
 
@@ -111,6 +113,58 @@ describe('ChatGateway', () => {
     ).rejects.toMatchObject({
       error: {
         errorCode: 'SENDER_CANNOT_ACKNOWLEDGE',
+      },
+    });
+  });
+
+  it('rejects an unauthenticated socket from sending messages', async () => {
+    const client = {
+      data: {},
+    } as unknown as Socket;
+
+    await expect(
+      gateway.handleSendMessage(client, {
+        conversationId: 'decdaa67-4c8c-4c65-964d-e01482a6cd49',
+        content: 'Hello',
+        idempotencyKey: 'test-key',
+      }),
+    ).rejects.toMatchObject({
+      error: {
+        errorCode: 'UNAUTHORIZED',
+      },
+    });
+  });
+
+  it('rejects an unauthenticated heartbeat', async () => {
+    const client = {
+      id: 'socket-1',
+      data: {},
+    } as unknown as Socket;
+
+    await expect(gateway.handleHeartbeat(client)).rejects.toMatchObject({
+      error: {
+        errorCode: 'UNAUTHORIZED',
+      },
+    });
+
+    expect(
+      (redisService.refreshSocketPresence as jest.Mock).mock.calls,
+    ).toHaveLength(0);
+  });
+
+  it('returns INTERNAL_ERROR when heartbeat presence refresh fails', async () => {
+    const client = {
+      id: 'socket-1',
+      data: { userId: 'user-1' },
+    } as unknown as Socket;
+
+    (redisService.refreshSocketPresence as jest.Mock).mockRejectedValueOnce(
+      new Error('Redis unavailable'),
+    );
+
+    await expect(gateway.handleHeartbeat(client)).rejects.toMatchObject({
+      error: {
+        errorCode: 'INTERNAL_ERROR',
       },
     });
   });

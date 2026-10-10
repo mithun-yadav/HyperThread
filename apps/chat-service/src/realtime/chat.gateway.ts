@@ -78,6 +78,13 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     // console.log('conversationId:', conversationId);
     // console.log('socket userId:', client.data.userId);
 
+    if (!client.data.userId) {
+      throw new WsException({
+        errorCode: 'UNAUTHORIZED',
+        message: 'Unauthorized',
+      });
+    }
+
     try {
       await this.messageService.checkMembership(
         conversationId,
@@ -104,6 +111,12 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @ConnectedSocket() client: Socket,
     @MessageBody() dto: SendSocketMessageDto,
   ) {
+    if (!client.data.userId) {
+      throw new WsException({
+        errorCode: 'UNAUTHORIZED',
+        message: 'Unauthorized',
+      });
+    }
     let result;
     try {
       result = await this.messageService.sendMessage(
@@ -213,7 +226,11 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
           status: 'ok',
         },
       };
-    } catch {
+    } catch (error) {
+      if (error instanceof WsException) {
+        throw error;
+      }
+
       throw new WsException({
         errorCode: 'INTERNAL_ERROR',
         message: 'Something went wrong',
