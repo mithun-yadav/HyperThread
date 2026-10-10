@@ -1,7 +1,8 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { NotFoundException } from '@nestjs/common';
+import { CanActivate, NotFoundException } from '@nestjs/common';
 import { ConversationController } from './conversation.controller';
 import { ConversationService } from './conversations.service';
+import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 
 describe('ConversationController', () => {
   let controller: ConversationController;
@@ -21,7 +22,10 @@ describe('ConversationController', () => {
           useValue: conversationService,
         },
       ],
-    }).compile();
+    })
+      .overrideGuard(JwtAuthGuard)
+      .useValue({ canActivate: () => true } satisfies CanActivate)
+      .compile();
 
     controller = module.get<ConversationController>(ConversationController);
   });
