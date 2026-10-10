@@ -484,6 +484,124 @@ describe('ConversationService', () => {
     });
   });
 
+  describe('createGroup', () => {
+    const callerId = 'user-1';
+    const memberIds = ['user-2', 'user-3'];
+    const dto = {
+      name: 'Engineering Team',
+      memberIds,
+    };
+
+    beforeEach(() => {
+      prisma.conversation.create.mockReset();
+    });
+
+    it('creates a group with the caller as ADMIN and other users as MEMBER', async () => {
+      const conversation = {
+        id: 'group-1',
+        type: ConversationType.GROUP,
+        name: 'Engineering Team',
+        members: [
+          { userId: callerId, role: ConversationRole.ADMIN },
+          { userId: 'user-2', role: ConversationRole.MEMBER },
+          { userId: 'user-3', role: ConversationRole.MEMBER },
+        ],
+      };
+
+      prisma.conversation.create.mockResolvedValue(conversation);
+
+      await expect(service.createGroup(callerId, dto)).resolves.toEqual(
+        conversation,
+      );
+
+      expect(prisma.conversation.create).toHaveBeenCalledWith({
+        data: {
+          type: ConversationType.GROUP,
+          name: 'Engineering Team',
+          members: {
+            create: [
+              { userId: callerId, role: ConversationRole.ADMIN },
+              { userId: 'user-2' },
+              { userId: 'user-3' },
+            ],
+          },
+        },
+        include: { members: true },
+      });
+    });
+
+    it('deduplicates member IDs', async () => {
+      prisma.conversation.create.mockResolvedValue({ id: 'group-1' });
+
+      await service.createGroup(callerId, {
+        name: 'Engineering Team',
+        memberIds: ['user-2', 'user-2', 'user-3'],
+      });
+
+      expect(prisma.conversation.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            members: {
+              create: [
+                { userId: callerId, role: ConversationRole.ADMIN },
+                { userId: 'user-2' },
+                { userId: 'user-3' },
+              ],
+            },
+          }),
+        }),
+      );
+    });
+
+    it('does not add the caller twice when caller ID is in memberIds', async () => {
+      prisma.conversation.create.mockResolvedValue({ id: 'group-1' });
+
+      await service.createGroup(callerId, {
+        name: 'Engineering Team',
+        memberIds: [callerId, 'user-2', 'user-3'],
+      });
+
+      expect(prisma.conversation.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            members: {
+              create: [
+                { userId: callerId, role: ConversationRole.ADMIN },
+                { userId: 'user-2' },
+                { userId: 'user-3' },
+              ],
+            },
+          }),
+        }),
+      );
+    });
+
+    it('rejects a group with fewer than two other unique members', async () => {
+      await expect(
+        service.createGroup(callerId, {
+          name: 'Engineering Team',
+          memberIds: ['user-2'],
+        }),
+      ).rejects.toThrow(BadRequestException);
+
+      await expect(
+        service.createGroup(callerId, {
+          name: 'Engineering Team',
+          memberIds: [callerId, 'user-2'],
+        }),
+      ).rejects.toThrow(BadRequestException);
+
+      expect(prisma.conversation.create).not.toHaveBeenCalled();
+    });
+
+    it('propagates database errors', async () => {
+      const error = new Error('Database unavailable');
+      prisma.conversation.create.mockRejectedValue(error);
+
+      await expect(service.createGroup(callerId, dto)).rejects.toThrow(error);
+    });
+  });
+
   describe('createDirect', () => {
     const callerId = 'user-1';
     const recipientId = 'user-2';
