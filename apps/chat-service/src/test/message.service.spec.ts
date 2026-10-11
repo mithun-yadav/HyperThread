@@ -9,7 +9,6 @@ import {
   MessageStatus,
   Prisma,
 } from '../generated/prisma/client';
-
 describe('MessageService', () => {
   let service: MessageService;
 
@@ -21,6 +20,8 @@ describe('MessageService', () => {
     message: {
       create: jest.fn(),
       findUnique: jest.fn(),
+      findFirst: jest.fn(),
+      update: jest.fn(),
       updateMany: jest.fn(),
     },
   };
@@ -121,6 +122,72 @@ describe('MessageService', () => {
     ).rejects.toBeInstanceOf(ConflictException);
   });
 
+  describe('editMessage', () => {
+    const editedContent = 'Updated message';
+
+    it('allows the sender to edit their message', async () => {
+      prisma.message.findFirst.mockResolvedValue(message);
+      prisma.message.update.mockResolvedValue({
+        ...message,
+        content: editedContent,
+        editedAt: new Date(),
+      });
+
+      const result = await service.editMessage(
+        conversationId,
+        message.id,
+        userId,
+        { content: editedContent },
+      );
+
+      expect(prisma.message.update).toHaveBeenCalledWith({
+        where: { id: message.id },
+        data: {
+          content: editedContent,
+          editedAt: expect.any(Date),
+        },
+      });
+      expect(result.content).toBe(editedContent);
+    });
+
+    it('rejects editing another users message', async () => {
+      prisma.message.findFirst.mockResolvedValue({
+        ...message,
+        senderId: 'a0f55a23-b2cb-4b87-b1a4-a7f02b37b3d8',
+      });
+
+      await expect(
+        service.editMessage(conversationId, message.id, userId, {
+          content: editedContent,
+        }),
+      ).rejects.toBeInstanceOf(ConflictException);
+
+      expect(prisma.message.update).not.toHaveBeenCalled();
+    });
+
+    it('rejects editing a message that does not exist in the conversation', async () => {
+      prisma.message.findFirst.mockResolvedValue(null);
+
+      await expect(
+        service.editMessage(conversationId, message.id, userId, {
+          content: editedContent,
+        }),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it('rejects editing when the caller is not a conversation member', async () => {
+      prisma.conversationMember.findUnique.mockResolvedValue(null);
+
+      await expect(
+        service.editMessage(conversationId, message.id, userId, {
+          content: editedContent,
+        }),
+      ).rejects.toBeInstanceOf(NotFoundException);
+
+      expect(prisma.message.findFirst).not.toHaveBeenCalled();
+    });
+  });
+
   describe('acknowledgeDelivery', () => {
     const recipientId = 'a0f55a23-b2cb-4b87-b1a4-a7f02b37b3d8';
 
@@ -213,6 +280,224 @@ describe('MessageService', () => {
       const result = await service.acknowledgeDelivery(message.id, recipientId);
 
       expect(result.status).toBe(MessageStatus.DELIVERED);
+    });
+  });
+
+  describe('acknowledgeRead', () => {
+    const recipientId = 'a0f55a23-b2cb-4b87-b1a4-a7f02b37b3d8';
+
+    const directMessage = {
+      ...message,
+      status: MessageStatus.SENT,
+      conversation: {
+        type: ConversationType.DIRECT,
+        members: [{ userId }, { userId: recipientId }],
+      },
+    };
+
+    it('marks a SENT direct message as READ', async () => {
+      prisma.message.findUnique
+        .mockResolvedValueOnce(directMessage)
+        .mockResolvedValueOnce({
+          ...message,
+          status: MessageStatus.READ,
+        });
+      prisma.message.updateMany.mockResolvedValue({ count: 1 });
+
+      const result = await service.acknowledgeRead(message.id, recipientId);
+
+      expect(prisma.message.updateMany).toHaveBeenCalledWith({
+        where: {
+          id: message.id,
+          status: {
+            in: [MessageStatus.SENT, MessageStatus.DELIVERED],
+          },
+        },
+        data: {
+          status: MessageStatus.READ,
+        },
+      });
+      expect(result.status).toBe(MessageStatus.READ);
+    });
+
+    it('marks a DELIVERED direct message as READ', async () => {
+      prisma.message.findUnique
+        .mockResolvedValueOnce({
+          ...directMessage,
+          status: MessageStatus.DELIVERED,
+        })
+        .mockResolvedValueOnce({
+          ...message,
+          status: MessageStatus.READ,
+        });
+      prisma.message.updateMany.mockResolvedValue({ count: 1 });
+
+      const result = await service.acknowledgeRead(message.id, recipientId);
+
+      expect(result.status).toBe(MessageStatus.READ);
+    });
+
+    it('rejects the sender acknowledging their own message', async () => {
+      prisma.message.findUnique.mockResolvedValue(directMessage);
+
+      await expect(
+        service.acknowledgeRead(message.id, userId),
+      ).rejects.toBeInstanceOf(ConflictException);
+
+      expect(prisma.message.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('rejects a non-member', async () => {
+      prisma.message.findUnique.mockResolvedValue({
+        ...directMessage,
+        conversation: {
+          ...directMessage.conversation,
+          members: [{ userId }],
+        },
+      });
+
+      await expect(
+        service.acknowledgeRead(message.id, recipientId),
+      ).rejects.toBeInstanceOf(NotFoundException);
+
+      expect(prisma.message.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('rejects acknowledgement for a group message', async () => {
+      prisma.message.findUnique.mockResolvedValue({
+        ...directMessage,
+        conversation: {
+          ...directMessage.conversation,
+          type: ConversationType.GROUP,
+        },
+      });
+
+      await expect(
+        service.acknowledgeRead(message.id, recipientId),
+      ).rejects.toBeInstanceOf(BadRequestException);
+
+      expect(prisma.message.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('rejects an unknown message', async () => {
+      prisma.message.findUnique.mockResolvedValue(null);
+
+      await expect(
+        service.acknowledgeRead(message.id, recipientId),
+      ).rejects.toBeInstanceOf(NotFoundException);
+
+      expect(prisma.message.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('keeps an already READ message READ on duplicate acknowledgement', async () => {
+      prisma.message.findUnique
+        .mockResolvedValueOnce({
+          ...directMessage,
+          status: MessageStatus.READ,
+        })
+        .mockResolvedValueOnce({
+          ...message,
+          status: MessageStatus.READ,
+        });
+      prisma.message.updateMany.mockResolvedValue({ count: 0 });
+
+      const result = await service.acknowledgeRead(message.id, recipientId);
+
+      expect(prisma.message.updateMany).toHaveBeenCalledWith({
+        where: {
+          id: message.id,
+          status: {
+            in: [MessageStatus.SENT, MessageStatus.DELIVERED],
+          },
+        },
+        data: {
+          status: MessageStatus.READ,
+        },
+      });
+      expect(result.status).toBe(MessageStatus.READ);
+    });
+  });
+
+  describe('deleteMessage', () => {
+    it('allows the sender to delete their message', async () => {
+      const deletedAt = new Date();
+
+      prisma.message.findFirst.mockResolvedValue(message);
+      prisma.message.update.mockResolvedValue({
+        ...message,
+        content: '',
+        deletedAt,
+      });
+
+      const result = await service.deleteMessage(
+        conversationId,
+        message.id,
+        userId,
+      );
+
+      expect(prisma.message.findFirst).toHaveBeenCalledWith({
+        where: {
+          id: message.id,
+          conversationId,
+        },
+      });
+
+      expect(prisma.message.update).toHaveBeenCalledWith({
+        where: { id: message.id },
+        data: {
+          content: '',
+          deletedAt: expect.any(Date),
+        },
+      });
+
+      expect(result.content).toBe('');
+      expect(result.deletedAt).toBeInstanceOf(Date);
+    });
+
+    it('rejects deleting another user’s message', async () => {
+      prisma.message.findFirst.mockResolvedValue({
+        ...message,
+        senderId: 'a0f55a23-b2cb-4b87-b1a4-a7f02b37b3d8',
+      });
+
+      await expect(
+        service.deleteMessage(conversationId, message.id, userId),
+      ).rejects.toBeInstanceOf(ConflictException);
+
+      expect(prisma.message.update).not.toHaveBeenCalled();
+    });
+
+    it('rejects deleting a message that does not exist', async () => {
+      prisma.message.findFirst.mockResolvedValue(null);
+
+      await expect(
+        service.deleteMessage(conversationId, message.id, userId),
+      ).rejects.toBeInstanceOf(NotFoundException);
+
+      expect(prisma.message.update).not.toHaveBeenCalled();
+    });
+
+    it('rejects deleting an already deleted message', async () => {
+      prisma.message.findFirst.mockResolvedValue({
+        ...message,
+        deletedAt: new Date(),
+      });
+
+      await expect(
+        service.deleteMessage(conversationId, message.id, userId),
+      ).rejects.toBeInstanceOf(NotFoundException);
+
+      expect(prisma.message.update).not.toHaveBeenCalled();
+    });
+
+    it('rejects deleting when the caller is not a conversation member', async () => {
+      prisma.conversationMember.findUnique.mockResolvedValue(null);
+
+      await expect(
+        service.deleteMessage(conversationId, message.id, userId),
+      ).rejects.toBeInstanceOf(NotFoundException);
+
+      expect(prisma.message.findFirst).not.toHaveBeenCalled();
     });
   });
 });

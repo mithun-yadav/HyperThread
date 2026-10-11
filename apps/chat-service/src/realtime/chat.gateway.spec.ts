@@ -5,12 +5,15 @@ import { RedisService } from '../redis/redis.service';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { Socket, Server } from 'socket.io';
+import { MessageEventsService } from '../message/message-events.service';
 
 describe('ChatGateway', () => {
   let gateway: ChatGateway;
 
   const messageService = {
     acknowledgeDelivery: jest.fn(),
+    acknowledgeRead: jest.fn(),
+    checkMembership: jest.fn(),
   };
 
   const redisService = {
@@ -27,11 +30,19 @@ describe('ChatGateway', () => {
   beforeEach(() => {
     jest.clearAllMocks();
 
+    const messageEventsService = {
+      registerMessageEditedHandler: jest.fn(),
+      emitMessageEdited: jest.fn(),
+      registerMessageDeleteHandler: jest.fn(),
+      emitMessageDeleted: jest.fn(),
+    } as unknown as MessageEventsService;
+
     gateway = new ChatGateway(
       jwtService,
       configService,
       messageService as unknown as MessageService,
       redisService,
+      messageEventsService,
     );
 
     gateway.server = server as unknown as Server;
@@ -167,5 +178,184 @@ describe('ChatGateway', () => {
         errorCode: 'INTERNAL_ERROR',
       },
     });
+  });
+
+  it('emits messageRead after successful acknowledgement', async () => {
+    const message = {
+      id: 'acd3c94e-f961-46ae-9101-c6628f6419b1',
+      conversationId: 'decdaa67-4c8c-4c65-964d-e01482a6cd49',
+      senderId: '399ba8fd-7169-46d9-93cf-e25ea94a00b9',
+      status: 'READ',
+    };
+
+    messageService.acknowledgeRead.mockResolvedValue(message);
+
+    const client = {
+      data: { userId: 'a0f55a23-b2cb-4b87-b1a4-a7f02b37b3d8' },
+    } as unknown as Socket;
+
+    const result = await gateway.handleAcknowledgeRead(client, message.id);
+
+    expect(messageService.acknowledgeRead).toHaveBeenCalledWith(
+      message.id,
+      client.data.userId,
+    );
+
+    expect(server.to).toHaveBeenCalledWith(message.conversationId);
+    expect(server.emit).toHaveBeenCalledWith('messageRead', {
+      messageId: message.id,
+      conversationId: message.conversationId,
+      senderId: message.senderId,
+      status: 'READ',
+    });
+
+    expect(result).toEqual({
+      event: 'readAcknowledged',
+      data: {
+        messageId: message.id,
+        status: 'READ',
+      },
+    });
+  });
+
+  it('rejects an unauthenticated read acknowledgement', async () => {
+    const client = {
+      data: {},
+    } as unknown as Socket;
+
+    await expect(
+      gateway.handleAcknowledgeRead(
+        client,
+        'acd3c94e-f961-46ae-9101-c6628f6419b1',
+      ),
+    ).rejects.toMatchObject({
+      error: {
+        errorCode: 'UNAUTHORIZED',
+      },
+    });
+
+    expect(messageService.acknowledgeRead).not.toHaveBeenCalled();
+  });
+
+  it('maps a missing read-receipt message to MESSAGE_NOT_FOUND', async () => {
+    messageService.acknowledgeRead.mockRejectedValue(new NotFoundException());
+
+    const client = {
+      data: { userId: 'a0f55a23-b2cb-4b87-b1a4-a7f02b37b3d8' },
+    } as unknown as Socket;
+
+    await expect(
+      gateway.handleAcknowledgeRead(
+        client,
+        'acd3c94e-f961-46ae-9101-c6628f6419b1',
+      ),
+    ).rejects.toMatchObject({
+      error: {
+        errorCode: 'MESSAGE_NOT_FOUND',
+      },
+    });
+  });
+
+  it('maps sender read acknowledgement to SENDER_CANNOT_ACKNOWLEDGE', async () => {
+    messageService.acknowledgeRead.mockRejectedValue(new ConflictException());
+
+    const client = {
+      data: { userId: 'a0f55a23-b2cb-4b87-b1a4-a7f02b37b3d8' },
+    } as unknown as Socket;
+
+    await expect(
+      gateway.handleAcknowledgeRead(
+        client,
+        'acd3c94e-f961-46ae-9101-c6628f6419b1',
+      ),
+    ).rejects.toMatchObject({
+      error: {
+        errorCode: 'SENDER_CANNOT_ACKNOWLEDGE',
+      },
+    });
+  });
+
+  it('broadcasts typing to other conversation members', async () => {
+    const conversationId = 'decdaa67-4c8c-4c65-964d-e01482a6cd49';
+    const userId = 'a0f55a23-b2cb-4b87-b1a4-a7f02b37b3d8';
+
+    messageService.checkMembership.mockResolvedValue(undefined);
+
+    const client = {
+      data: { userId },
+      to: jest.fn().mockReturnValue({ emit: jest.fn() }),
+    } as unknown as Socket;
+
+    const result = await gateway.handleTyping(client, conversationId);
+
+    expect(messageService.checkMembership).toHaveBeenCalledWith(
+      conversationId,
+      userId,
+    );
+    expect(client.to).toHaveBeenCalledWith(conversationId);
+    expect(result).toEqual({
+      event: 'typingAcknowledged',
+      data: { conversationId },
+    });
+  });
+
+  it('rejects an unauthenticated typing event', async () => {
+    const client = { data: {} } as unknown as Socket;
+
+    await expect(
+      gateway.handleTyping(client, 'decdaa67-4c8c-4c65-964d-e01482a6cd49'),
+    ).rejects.toMatchObject({
+      error: { errorCode: 'UNAUTHORIZED' },
+    });
+
+    expect(messageService.checkMembership).not.toHaveBeenCalled();
+  });
+
+  it('broadcasts stopTyping to other conversation members', async () => {
+    const conversationId = 'decdaa67-4c8c-4c65-964d-e01482a6cd49';
+    const userId = 'a0f55a23-b2cb-4b87-b1a4-a7f02b37b3d8';
+    const emit = jest.fn();
+
+    messageService.checkMembership.mockResolvedValue(undefined);
+
+    const client = {
+      data: { userId },
+      to: jest.fn().mockReturnValue({ emit }),
+    } as unknown as Socket;
+
+    const result = await gateway.handleStopTyping(client, conversationId);
+
+    expect(messageService.checkMembership).toHaveBeenCalledWith(
+      conversationId,
+      userId,
+    );
+    expect(client.to).toHaveBeenCalledWith(conversationId);
+    expect(emit).toHaveBeenCalledWith('userStoppedTyping', {
+      conversationId,
+      userId,
+    });
+    expect(result).toEqual({
+      event: 'stopTypingAcknowledged',
+      data: { conversationId },
+    });
+  });
+
+  it('rejects typing events from non-members', async () => {
+    const conversationId = 'decdaa67-4c8c-4c65-964d-e01482a6cd49';
+
+    messageService.checkMembership.mockRejectedValue(new NotFoundException());
+
+    const client = {
+      data: { userId: 'a0f55a23-b2cb-4b87-b1a4-a7f02b37b3d8' },
+      to: jest.fn(),
+    } as unknown as Socket;
+
+    await expect(
+      gateway.handleTyping(client, conversationId),
+    ).rejects.toMatchObject({
+      error: { errorCode: 'CONVERSATION_NOT_FOUND' },
+    });
+
+    expect(client.to).not.toHaveBeenCalled();
   });
 });

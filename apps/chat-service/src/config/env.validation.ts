@@ -6,4 +6,5 @@ export const envValidationSchema = Joi.object({
   NODE_ENV: Joi.string().valid('development', 'production', 'test').required(),
   JWT_ACCESS_SECRET: Joi.string().min(32).required(),
   REDIS_URL: Joi.string().uri().required(),
+  INTERNAL_API_KEY: Joi.string().min(32).required(),
 });

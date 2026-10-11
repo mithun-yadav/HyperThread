@@ -11,6 +11,7 @@ import {
   MessageStatus,
   Prisma,
 } from '../generated/prisma/client';
+import { EditMessageDto } from '../conversations/dto/edit-message.dto';
 
 @Injectable()
 export class MessageService {
@@ -232,5 +233,153 @@ export class MessageService {
     }
 
     return updateMessage;
+  }
+
+  async acknowledgeRead(messageId: string, callerId: string) {
+    const message = await this.prisma.message.findUnique({
+      where: {
+        id: messageId,
+      },
+      include: {
+        conversation: {
+          select: {
+            type: true,
+            members: {
+              select: { userId: true },
+            },
+          },
+        },
+      },
+    });
+
+    if (!message) {
+      throw new NotFoundException({
+        message: 'Message not found',
+        errorCode: 'MESSAGE_NOT_FOUND',
+      });
+    }
+
+    if (message.conversation.type !== ConversationType.DIRECT) {
+      throw new BadRequestException({
+        message: 'Read acknowledgement is only supported for direct chats',
+        errorCode: 'DIRECT_CHAT_ONLY',
+      });
+    }
+
+    const isMember = message.conversation.members.some(
+      (member) => member.userId == callerId,
+    );
+
+    if (!isMember) {
+      throw new NotFoundException({
+        message: 'Message not found',
+        errorCode: 'MESSAGE_NOT_FOUND',
+      });
+    }
+
+    if (message.senderId === callerId) {
+      throw new ConflictException({
+        message: 'Senders cannot acknowledge their own message',
+        errorCode: 'SENDER_CANNOT_ACKNOWLEDGE',
+      });
+    }
+
+    await this.prisma.message.updateMany({
+      where: {
+        id: messageId,
+        status: {
+          in: [MessageStatus.SENT, MessageStatus.DELIVERED],
+        },
+      },
+      data: {
+        status: MessageStatus.READ,
+      },
+    });
+
+    const updatedMessage = await this.prisma.message.findUnique({
+      where: { id: messageId },
+    });
+
+    if (!updatedMessage) {
+      throw new NotFoundException({
+        message: 'Message not found',
+        errorCode: 'MESSAGE_NOT_FOUND',
+      });
+    }
+
+    return updatedMessage;
+  }
+
+  async editMessage(
+    conversationId: string,
+    messageId: string,
+    callerId: string,
+    dto: EditMessageDto,
+  ) {
+    await this.ensureMembership(conversationId, callerId);
+
+    const message = await this.prisma.message.findFirst({
+      where: {
+        id: messageId,
+        conversationId,
+      },
+    });
+    if (!message) {
+      throw new NotFoundException({
+        message: 'Message not found',
+        errorCode: 'MESSAGE_NOT_FOUND',
+      });
+    }
+    if (message.senderId !== callerId) {
+      throw new ConflictException({
+        message: 'Only the sender can edit this message',
+        errorCode: 'MESSAGE_EDIT_FORBIDDEN',
+      });
+    }
+
+    return this.prisma.message.update({
+      where: { id: messageId },
+      data: {
+        content: dto.content,
+        editedAt: new Date(),
+      },
+    });
+  }
+
+  async deleteMessage(
+    conversationId: string,
+    messageId: string,
+    callerId: string,
+  ) {
+    await this.ensureMembership(conversationId, callerId);
+
+    const message = await this.prisma.message.findFirst({
+      where: {
+        id: messageId,
+        conversationId,
+      },
+    });
+
+    if (!message || message.deletedAt) {
+      throw new NotFoundException({
+        message: 'Message not found',
+        errorCode: 'MESSAGE_NOT_FOUND',
+      });
+    }
+
+    if (message.senderId !== callerId) {
+      throw new ConflictException({
+        message: 'Only the sender can delete this message',
+        errorCode: 'MESSAGE_DELETE_FORBIDDEN',
+      });
+    }
+
+    return this.prisma.message.update({
+      where: { id: messageId },
+      data: {
+        content: '',
+        deletedAt: new Date(),
+      },
+    });
   }
 }

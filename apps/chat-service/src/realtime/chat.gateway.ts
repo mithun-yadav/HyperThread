@@ -22,6 +22,7 @@ import {
 import { MessageService } from '../message/message.service';
 import { SendSocketMessageDto } from '../conversations/dto/send-message.dto';
 import { WsValidationPipe } from '../common/pipes/ws-validation.pipe';
+import { MessageEventsService } from '../message/message-events.service';
 
 @Injectable()
 @WebSocketGateway({
@@ -38,7 +39,28 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     private readonly configService: ConfigService,
     private readonly messageService: MessageService,
     private readonly redisService: RedisService,
-  ) {}
+    private readonly messageEventsService: MessageEventsService,
+  ) {
+    this.messageEventsService.registerMessageEditedHandler(
+      (conversationId, message) => {
+        this.emitMessageEdited(conversationId, message);
+      },
+    );
+
+    this.messageEventsService.registerMessageDeleteHandler(
+      (conversationId, message) => {
+        this.emitMessageDeleted(conversationId, message);
+      },
+    );
+  }
+
+  emitMessageEdited(conversationId: string, message: unknown) {
+    this.server.to(conversationId).emit('messageEdited', message);
+  }
+
+  emitMessageDeleted(conversationId: string, message: unknown) {
+    this.server.to(conversationId).emit('messageDeleted', message);
+  }
 
   async handleConnection(client: Socket) {
     const token = client.handshake.auth?.token;
@@ -204,6 +226,59 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
   }
 
+  @SubscribeMessage('acknowledgeRead')
+  async handleAcknowledgeRead(
+    @ConnectedSocket() client: Socket,
+    @MessageBody(new ParseUUIDPipe()) messageId: string,
+  ) {
+    if (!client.data.userId) {
+      throw new WsException({
+        errorCode: 'UNAUTHORIZED',
+        message: 'Unauthorized',
+      });
+    }
+    try {
+      const message = await this.messageService.acknowledgeRead(
+        messageId,
+        client.data.userId,
+      );
+
+      this.server.to(message.conversationId).emit('messageRead', {
+        messageId: message.id,
+        conversationId: message.conversationId,
+        senderId: message.senderId,
+        status: message.status,
+      });
+
+      return {
+        event: 'readAcknowledged',
+        data: {
+          messageId: message.id,
+          status: message.status,
+        },
+      };
+    } catch (error) {
+      if (error instanceof NotFoundException) {
+        throw new WsException({
+          errorCode: 'MESSAGE_NOT_FOUND',
+          message: 'Message not found',
+        });
+      }
+
+      if (error instanceof ConflictException) {
+        throw new WsException({
+          errorCode: 'SENDER_CANNOT_ACKNOWLEDGE',
+          message: 'Sender cannot acknowledge their own message',
+        });
+      }
+
+      throw new WsException({
+        errorCode: 'READ_ACKNOWLEDGEMENT_FAILED',
+        message: 'Could not acknowledge message read status',
+      });
+    }
+  }
+
   @SubscribeMessage('heartbeat')
   async handleHeartbeat(@ConnectedSocket() client: Socket) {
     try {
@@ -236,5 +311,75 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         message: 'Something went wrong',
       });
     }
+  }
+
+  @SubscribeMessage('typing')
+  async handleTyping(
+    @ConnectedSocket() client: Socket,
+    @MessageBody(new ParseUUIDPipe()) conversationId: string,
+  ) {
+    if (!client.data.userId) {
+      throw new WsException({
+        errorCode: 'UNAUTHORIZED',
+        message: 'Unauthorized',
+      });
+    }
+
+    try {
+      await this.messageService.checkMembership(
+        conversationId,
+        client.data.userId,
+      );
+    } catch {
+      throw new WsException({
+        errorCode: 'CONVERSATION_NOT_FOUND',
+        message: 'Conversation not found',
+      });
+    }
+
+    client.to(conversationId).emit('userTyping', {
+      conversationId,
+      userId: client.data.userId,
+    });
+
+    return {
+      event: 'typingAcknowledged',
+      data: { conversationId },
+    };
+  }
+
+  @SubscribeMessage('stopTyping')
+  async handleStopTyping(
+    @ConnectedSocket() client: Socket,
+    @MessageBody(new ParseUUIDPipe()) conversationId: string,
+  ) {
+    if (!client.data.userId) {
+      throw new WsException({
+        errorCode: 'UNAUTHORIZED',
+        message: 'Unauthorized',
+      });
+    }
+
+    try {
+      await this.messageService.checkMembership(
+        conversationId,
+        client.data.userId,
+      );
+    } catch {
+      throw new WsException({
+        errorCode: 'CONVERSATION_NOT_FOUND',
+        message: 'Conversation not found',
+      });
+    }
+
+    client.to(conversationId).emit('userStoppedTyping', {
+      conversationId,
+      userId: client.data.userId,
+    });
+
+    return {
+      event: 'stopTypingAcknowledged',
+      data: { conversationId },
+    };
   }
 }

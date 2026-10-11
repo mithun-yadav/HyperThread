@@ -2,9 +2,11 @@ import {
   BadRequestException,
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   ParseUUIDPipe,
+  Patch,
   Post,
   Query,
   Req,
@@ -14,11 +16,16 @@ import type { Request } from 'express';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { MessageService } from './message.service';
 import { SendMessageDto } from '../conversations/dto/send-message.dto';
+import { EditMessageDto } from '../conversations/dto/edit-message.dto';
+import { MessageEventsService } from './message-events.service';
 
 @Controller('conversations/:conversationId/messages')
 @UseGuards(JwtAuthGuard)
 export class MessageController {
-  constructor(private readonly messageService: MessageService) {}
+  constructor(
+    private readonly messageService: MessageService,
+    private readonly messageEventsService: MessageEventsService,
+  ) {}
 
   @Post()
   async sendMessage(
@@ -57,5 +64,41 @@ export class MessageController {
       parsedLimit,
       before,
     );
+  }
+
+  @Patch(':messageId')
+  async editMessage(
+    @Param('conversationId', new ParseUUIDPipe()) conversationId: string,
+    @Param('messageId', new ParseUUIDPipe()) messageId: string,
+    @Req() req: Request,
+    @Body() dto: EditMessageDto,
+  ) {
+    const message = await this.messageService.editMessage(
+      conversationId,
+      messageId,
+      req.user!.sub,
+      dto,
+    );
+
+    this.messageEventsService.emitMessageEdited(conversationId, message);
+
+    return message;
+  }
+
+  @Delete(':messageId')
+  async deleteMessage(
+    @Param('conversationId', new ParseUUIDPipe()) conversationId: string,
+    @Param('messageId', new ParseUUIDPipe()) messageId: string,
+    @Req() req: Request,
+  ) {
+    const message = await this.messageService.deleteMessage(
+      conversationId,
+      messageId,
+      req.user!.sub,
+    );
+
+    this.messageEventsService.emitMessageDeleted(conversationId, message);
+
+    return message;
   }
 }

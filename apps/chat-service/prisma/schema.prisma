@@ -20,6 +20,7 @@ enum ConversationRole {
 enum MessageStatus {
   SENT
   DELIVERED
+  READ
 }
 
 model Conversation {
@@ -55,6 +56,8 @@ model Message {
   idempotencyKey String
   status MessageStatus @default(SENT)
   createdAt      DateTime @default(now())
+  editedAt DateTime?
+  deletedAt DateTime?
 
   conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
 
