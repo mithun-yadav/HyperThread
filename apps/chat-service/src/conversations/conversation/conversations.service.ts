@@ -13,10 +13,14 @@ import {
 import type { CreateDirectConversationDto } from '../dto/create-direct-conversation.dto';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateGroupConversationDto } from '../dto/create-group-conversation.dto';
+import { AuthUserClientService } from '../../auth/auth-user-client.service';
 
 @Injectable()
 export class ConversationService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly authUserClient: AuthUserClientService,
+  ) {}
   async createDirect(callerId: string, dto: CreateDirectConversationDto) {
     const recipientId = dto.recipientId;
     const directKey = [callerId, recipientId].sort().join(':');
@@ -26,6 +30,8 @@ export class ConversationService {
         'You cannot create a conversation with yourself',
       );
     }
+
+    await this.authUserClient.validateUser(recipientId);
 
     const existing = await this.prisma.conversation.findUnique({
       where: {
@@ -81,6 +87,10 @@ export class ConversationService {
     if (uniqueMemberIds.length < 2) {
       throw new BadRequestException('Select a member to create a group');
     }
+
+    await Promise.all(
+      uniqueMemberIds.map((userId) => this.authUserClient.validateUser(userId)),
+    );
 
     return this.prisma.conversation.create({
       data: {
@@ -181,6 +191,8 @@ export class ConversationService {
     if (existingMember) {
       throw new ConflictException('User is already a member');
     }
+
+    await this.authUserClient.validateUser(userId);
 
     return this.prisma.conversationMember.create({
       data: {

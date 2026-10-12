@@ -10,15 +10,15 @@ import type { Request } from 'express';
 
 @Injectable()
 export class InternalApiKeyGuard implements CanActivate {
-  constructor(private readonly ConfigService: ConfigService) {}
+  constructor(private readonly configService: ConfigService) {}
 
   canActivate(context: ExecutionContext): boolean {
     const request = context.switchToHttp().getRequest<Request>();
-    const provideKey = request.header('x-internal-api-key');
+    const providedKey = request.header('x-internal-api-key');
     const expectedKey =
-      this.ConfigService.getOrThrow<string>('INTERNAL_API_KEY');
+      this.configService.getOrThrow<string>('INTERNAL_API_KEY');
 
-    if (!provideKey || provideKey !== expectedKey) {
+    if (!providedKey || providedKey !== expectedKey) {
       throw new UnauthorizedException({
         message: 'Invalid or missing internal API key',
         errorCode: 'INTERNAL_INVALID_API_KEY',
