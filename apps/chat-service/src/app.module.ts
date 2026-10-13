@@ -12,6 +12,7 @@ import { ConversationModule } from './conversations/conversation/conversation.mo
 import { MessageModule } from './message/message.module';
 import { RealtimeModule } from './realtime/realtime.module';
 import { RedisModule } from './redis/redis.module';
+import { KafkaModule } from './kafka/kafka.module';
 
 @Module({
   imports: [
@@ -20,6 +21,7 @@ import { RedisModule } from './redis/redis.module';
       validationSchema: envValidationSchema,
     }),
     RedisModule,
+    KafkaModule,
     HealthModule,
     PrismaModule,
     MessageModule,

@@ -8,4 +8,5 @@ export const envValidationSchema = Joi.object({
   REDIS_URL: Joi.string().uri().required(),
   INTERNAL_API_KEY: Joi.string().min(32).required(),
   AUTH_SERVICE_URL: Joi.string().uri().required(),
+  KAFKA_BROKERS: Joi.string().required(),
 });
