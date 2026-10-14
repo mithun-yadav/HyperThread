@@ -13,6 +13,7 @@ describe('MessageService', () => {
   let service: MessageService;
 
   const prisma = {
+    $transaction: jest.fn(),
     conversationMember: {
       findUnique: jest.fn(),
       delete: jest.fn(),
@@ -24,6 +25,9 @@ describe('MessageService', () => {
       update: jest.fn(),
       updateMany: jest.fn(),
     },
+    outboxEvent: {
+      create: jest.fn(),
+    },
   };
 
   beforeEach(() => {
@@ -31,6 +35,17 @@ describe('MessageService', () => {
 
     service = new MessageService(prisma as any);
   });
+
+  prisma.$transaction.mockImplementation(async (callback) =>
+    callback({
+      message: {
+        create: prisma.message.create,
+      },
+      outboxEvent: {
+        create: prisma.outboxEvent.create,
+      },
+    }),
+  );
 
   const conversationId = 'decdaa67-4c8c-4c65-964d-e01482a6cd49';
   const userId = '399ba8fd-7169-46d9-93cf-e25ea94a00b9';
@@ -73,6 +88,7 @@ describe('MessageService', () => {
     });
 
     expect(prisma.message.create).toHaveBeenCalledTimes(1);
+    expect(prisma.outboxEvent.create).toHaveBeenCalledTimes(1);
   });
 
   it('returns the existing message on idempotent retry', async () => {
@@ -92,6 +108,7 @@ describe('MessageService', () => {
 
     expect(prisma.message.create).toHaveBeenCalledTimes(1);
     expect(prisma.message.findUnique).toHaveBeenCalledTimes(1);
+    expect(prisma.outboxEvent.create).not.toHaveBeenCalled();
   });
 
   it('rejects reuse of an idempotency key for a different message', async () => {

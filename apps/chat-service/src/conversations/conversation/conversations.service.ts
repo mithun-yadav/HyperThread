@@ -14,6 +14,7 @@ import type { CreateDirectConversationDto } from '../dto/create-direct-conversat
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateGroupConversationDto } from '../dto/create-group-conversation.dto';
 import { AuthUserClientService } from '../../auth/auth-user-client.service';
+import { randomUUID } from 'crypto';
 
 @Injectable()
 export class ConversationService {
@@ -47,17 +48,44 @@ export class ConversationService {
     }
 
     try {
-      return await this.prisma.conversation.create({
-        data: {
-          type: ConversationType.DIRECT,
-          directKey,
-          members: {
-            create: [{ userId: callerId }, { userId: recipientId }],
+      return await this.prisma.$transaction(async (tx) => {
+        const conversation = await tx.conversation.create({
+          data: {
+            type: ConversationType.DIRECT,
+            directKey,
+            members: {
+              create: [{ userId: callerId }, { userId: recipientId }],
+            },
           },
-        },
-        include: {
-          members: true,
-        },
+          include: { members: true },
+        });
+
+        const eventId = randomUUID();
+
+        await tx.outboxEvent.create({
+          data: {
+            id: eventId,
+            eventType: 'ConversationCreated',
+            aggregateId: conversation.id,
+            payload: {
+              eventId,
+              eventType: 'ConversationCreated',
+              aggregateId: conversation.id,
+              occurredAt: conversation.createdAt.toISOString(),
+              data: {
+                id: conversation.id,
+                type: conversation.type,
+                directKey: conversation.directKey,
+                members: conversation.members.map((member) => ({
+                  userId: member.userId,
+                  role: member.role,
+                })),
+                createdAt: conversation.createdAt.toISOString(),
+              },
+            },
+          },
+        });
+        return conversation;
       });
     } catch (error) {
       if (
@@ -92,23 +120,45 @@ export class ConversationService {
       uniqueMemberIds.map((userId) => this.authUserClient.validateUser(userId)),
     );
 
-    return this.prisma.conversation.create({
-      data: {
-        type: ConversationType.GROUP,
-        name: dto.name,
-        members: {
-          create: [
-            {
-              userId: callerId,
-              role: ConversationRole.ADMIN,
-            },
-            ...uniqueMemberIds.map((userId) => ({ userId })),
-          ],
+    return this.prisma.$transaction(async (tx) => {
+      const conversation = await tx.conversation.create({
+        data: {
+          type: ConversationType.GROUP,
+          name: dto.name,
+          members: {
+            create: [
+              { userId: callerId, role: ConversationRole.ADMIN },
+              ...uniqueMemberIds.map((userId) => ({ userId })),
+            ],
+          },
         },
-      },
-      include: {
-        members: true,
-      },
+        include: { members: true },
+      });
+      const eventId = randomUUID();
+      await tx.outboxEvent.create({
+        data: {
+          id: eventId,
+          eventType: 'ConversationCreated',
+          aggregateId: conversation.id,
+          payload: {
+            eventId,
+            eventType: 'ConversationCreated',
+            aggregateId: conversation.id,
+            occurredAt: conversation.createdAt.toISOString(),
+            data: {
+              id: conversation.id,
+              type: conversation.type,
+              name: conversation.name,
+              members: conversation.members.map((member) => ({
+                userId: member.userId,
+                role: member.role,
+              })),
+              createdAt: conversation.createdAt.toISOString(),
+            },
+          },
+        },
+      });
+      return conversation;
     });
   }
 

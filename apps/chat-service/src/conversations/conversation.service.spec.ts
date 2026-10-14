@@ -5,6 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
+import { AuthUserClientService } from '../auth/auth-user-client.service';
 import {
   ConversationRole,
   ConversationType,
@@ -29,11 +30,27 @@ describe('ConversationService', () => {
       delete: jest.fn(),
       create: jest.fn(),
     },
+    outboxEvent: {
+      create: jest.fn(),
+    },
     $transaction: jest.fn(),
+  };
+
+  const tx = {
+    conversation: {
+      create: jest.fn(),
+    },
+    outboxEvent: {
+      create: jest.fn(),
+    },
   };
 
   beforeEach(async () => {
     jest.clearAllMocks();
+
+    prisma.$transaction.mockImplementation(
+      (callback: (transaction: typeof tx) => Promise<unknown>) => callback(tx),
+    );
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -41,6 +58,12 @@ describe('ConversationService', () => {
         {
           provide: PrismaService,
           useValue: prisma,
+        },
+        {
+          provide: AuthUserClientService,
+          useValue: {
+            validateUser: jest.fn().mockResolvedValue(undefined),
+          },
         },
       ],
     }).compile();
@@ -493,7 +516,7 @@ describe('ConversationService', () => {
     };
 
     beforeEach(() => {
-      prisma.conversation.create.mockReset();
+      tx.conversation.create.mockReset();
     });
 
     it('creates a group with the caller as ADMIN and other users as MEMBER', async () => {
@@ -501,6 +524,7 @@ describe('ConversationService', () => {
         id: 'group-1',
         type: ConversationType.GROUP,
         name: 'Engineering Team',
+        createdAt: new Date('2026-10-14T12:00:00.000Z'),
         members: [
           { userId: callerId, role: ConversationRole.ADMIN },
           { userId: 'user-2', role: ConversationRole.MEMBER },
@@ -508,13 +532,13 @@ describe('ConversationService', () => {
         ],
       };
 
-      prisma.conversation.create.mockResolvedValue(conversation);
+      tx.conversation.create.mockResolvedValue(conversation);
 
       await expect(service.createGroup(callerId, dto)).resolves.toEqual(
         conversation,
       );
 
-      expect(prisma.conversation.create).toHaveBeenCalledWith({
+      expect(tx.conversation.create).toHaveBeenCalledWith({
         data: {
           type: ConversationType.GROUP,
           name: 'Engineering Team',
@@ -531,14 +555,20 @@ describe('ConversationService', () => {
     });
 
     it('deduplicates member IDs', async () => {
-      prisma.conversation.create.mockResolvedValue({ id: 'group-1' });
+      tx.conversation.create.mockResolvedValue({
+        id: 'group-1',
+        type: ConversationType.GROUP,
+        name: 'Engineering Team',
+        createdAt: new Date('2026-10-14T12:00:00.000Z'),
+        members: [],
+      });
 
       await service.createGroup(callerId, {
         name: 'Engineering Team',
         memberIds: ['user-2', 'user-2', 'user-3'],
       });
 
-      expect(prisma.conversation.create).toHaveBeenCalledWith(
+      expect(tx.conversation.create).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({
             members: {
@@ -554,14 +584,20 @@ describe('ConversationService', () => {
     });
 
     it('does not add the caller twice when caller ID is in memberIds', async () => {
-      prisma.conversation.create.mockResolvedValue({ id: 'group-1' });
+      tx.conversation.create.mockResolvedValue({
+        id: 'group-1',
+        type: ConversationType.GROUP,
+        name: 'Engineering Team',
+        createdAt: new Date('2026-10-14T12:00:00.000Z'),
+        members: [],
+      });
 
       await service.createGroup(callerId, {
         name: 'Engineering Team',
         memberIds: [callerId, 'user-2', 'user-3'],
       });
 
-      expect(prisma.conversation.create).toHaveBeenCalledWith(
+      expect(tx.conversation.create).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({
             members: {
@@ -591,12 +627,12 @@ describe('ConversationService', () => {
         }),
       ).rejects.toThrow(BadRequestException);
 
-      expect(prisma.conversation.create).not.toHaveBeenCalled();
+      expect(tx.conversation.create).not.toHaveBeenCalled();
     });
 
     it('propagates database errors', async () => {
       const error = new Error('Database unavailable');
-      prisma.conversation.create.mockRejectedValue(error);
+      tx.conversation.create.mockRejectedValue(error);
 
       await expect(service.createGroup(callerId, dto)).rejects.toThrow(error);
     });
@@ -609,7 +645,9 @@ describe('ConversationService', () => {
 
     beforeEach(() => {
       prisma.conversation.findUnique.mockReset();
-      prisma.conversation.create.mockReset();
+      tx.conversation.create.mockReset();
+      tx.outboxEvent.create.mockReset();
+      tx.outboxEvent.create.mockResolvedValue({});
     });
 
     it('creates a direct conversation with both users', async () => {
@@ -617,17 +655,18 @@ describe('ConversationService', () => {
         id: 'direct-1',
         type: ConversationType.DIRECT,
         directKey: 'user-1:user-2',
+        createdAt: new Date('2026-10-14T12:00:00.000Z'),
         members: [{ userId: callerId }, { userId: recipientId }],
       };
 
       prisma.conversation.findUnique.mockResolvedValue(null);
-      prisma.conversation.create.mockResolvedValue(conversation);
+      tx.conversation.create.mockResolvedValue(conversation);
 
       await expect(service.createDirect(callerId, dto)).resolves.toEqual(
         conversation,
       );
 
-      expect(prisma.conversation.create).toHaveBeenCalledWith({
+      expect(tx.conversation.create).toHaveBeenCalledWith({
         data: {
           type: ConversationType.DIRECT,
           directKey: 'user-1:user-2',
@@ -644,7 +683,7 @@ describe('ConversationService', () => {
         service.createDirect(callerId, { recipientId: callerId }),
       ).rejects.toThrow(BadRequestException);
 
-      expect(prisma.conversation.create).not.toHaveBeenCalled();
+      expect(tx.conversation.create).not.toHaveBeenCalled();
     });
 
     it('returns an existing direct conversation', async () => {
@@ -661,9 +700,8 @@ describe('ConversationService', () => {
         existing,
       );
 
-      expect(prisma.conversation.create).not.toHaveBeenCalled();
+      expect(tx.conversation.create).not.toHaveBeenCalled();
     });
-
     it('returns the existing conversation after a concurrent creation conflict', async () => {
       const existing = {
         id: 'direct-existing',
@@ -684,7 +722,7 @@ describe('ConversationService', () => {
         .mockResolvedValueOnce(null)
         .mockResolvedValueOnce(existing);
 
-      prisma.conversation.create.mockRejectedValue(conflictError);
+      tx.conversation.create.mockRejectedValue(conflictError);
 
       await expect(service.createDirect(callerId, dto)).resolves.toEqual(
         existing,

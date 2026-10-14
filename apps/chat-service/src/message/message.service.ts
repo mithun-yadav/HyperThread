@@ -12,6 +12,7 @@ import {
   Prisma,
 } from '../generated/prisma/client';
 import { EditMessageDto } from '../conversations/dto/edit-message.dto';
+import { randomUUID } from 'node:crypto';
 
 @Injectable()
 export class MessageService {
@@ -47,13 +48,40 @@ export class MessageService {
     await this.ensureMembership(conversationId, callerId);
 
     try {
-      const message = await this.prisma.message.create({
-        data: {
-          conversationId,
-          senderId: callerId,
-          content: dto.content,
-          idempotencyKey: dto.idempotencyKey,
-        },
+      const message = await this.prisma.$transaction(async (tx) => {
+        const createMessage = await tx.message.create({
+          data: {
+            conversationId,
+            senderId: callerId,
+            content: dto.content,
+            idempotencyKey: dto.idempotencyKey,
+          },
+        });
+
+        const eventId = randomUUID();
+
+        await tx.outboxEvent.create({
+          data: {
+            id: eventId,
+            eventType: 'MessageCreated',
+            aggregateId: createMessage.id,
+            payload: {
+              eventId,
+              eventType: 'MessageCreated',
+              aggregateId: createMessage.id,
+              occurredAt: createMessage.createdAt.toISOString(),
+              data: {
+                id: createMessage.id,
+                conversationId: createMessage.conversationId,
+                senderId: createMessage.senderId,
+                content: createMessage.content,
+                createdAt: createMessage.createdAt.toISOString(),
+                status: createMessage.status,
+              },
+            },
+          },
+        });
+        return createMessage;
       });
 
       return {
@@ -61,6 +89,7 @@ export class MessageService {
         created: true,
       };
     } catch (error) {
+      console.error('[sendMessage] Original error:', error);
       if (
         error instanceof Prisma.PrismaClientKnownRequestError &&
         error.code === 'P2002'
