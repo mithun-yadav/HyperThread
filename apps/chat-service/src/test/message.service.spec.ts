@@ -40,6 +40,8 @@ describe('MessageService', () => {
     callback({
       message: {
         create: prisma.message.create,
+        updateMany: prisma.message.updateMany,
+        findUnique: prisma.message.findUnique,
       },
       outboxEvent: {
         create: prisma.outboxEvent.create,
@@ -335,6 +337,26 @@ describe('MessageService', () => {
         },
       });
       expect(result.status).toBe(MessageStatus.READ);
+
+      expect(prisma.outboxEvent.create).toHaveBeenCalledTimes(1);
+
+      expect(prisma.outboxEvent.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            eventType: 'MessageRead',
+            aggregateId: message.id,
+            payload: expect.objectContaining({
+              eventType: 'MessageRead',
+              aggregateId: message.id,
+              data: expect.objectContaining({
+                conversationId,
+                readerId: recipientId,
+                status: MessageStatus.READ,
+              }),
+            }),
+          }),
+        }),
+      );
     });
 
     it('marks a DELIVERED direct message as READ', async () => {
@@ -432,6 +454,7 @@ describe('MessageService', () => {
         },
       });
       expect(result.status).toBe(MessageStatus.READ);
+      expect(prisma.outboxEvent.create).not.toHaveBeenCalled();
     });
   });
 

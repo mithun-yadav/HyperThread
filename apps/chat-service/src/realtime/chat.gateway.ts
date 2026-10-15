@@ -13,6 +13,7 @@ import {
   WebSocketServer,
 } from '@nestjs/websockets';
 import {
+  BadRequestException,
   ConflictException,
   Injectable,
   NotFoundException,
@@ -231,6 +232,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @ConnectedSocket() client: Socket,
     @MessageBody(new ParseUUIDPipe()) messageId: string,
   ) {
+    console.log('ACKNOWLEDGE READ RECEIVED:', messageId);
     if (!client.data.userId) {
       throw new WsException({
         errorCode: 'UNAUTHORIZED',
@@ -243,12 +245,16 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         client.data.userId,
       );
 
+      console.log('READ ACK SERVICE RESULT:', message);
+
       this.server.to(message.conversationId).emit('messageRead', {
         messageId: message.id,
         conversationId: message.conversationId,
         senderId: message.senderId,
         status: message.status,
       });
+
+      console.log('READ ACK RESPONSE SENT');
 
       return {
         event: 'readAcknowledged',
@@ -258,6 +264,16 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         },
       };
     } catch (error) {
+      if (
+        error instanceof BadRequestException &&
+        (error.getResponse() as { errorCode?: string }).errorCode ===
+          'DIRECT_CHAT_ONLY'
+      ) {
+        throw new WsException({
+          errorCode: 'DIRECT_CHAT_ONLY',
+          message: 'Read acknowledgement is only supported for direct chats',
+        });
+      }
       if (error instanceof NotFoundException) {
         throw new WsException({
           errorCode: 'MESSAGE_NOT_FOUND',

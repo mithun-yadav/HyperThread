@@ -1,3 +1,4 @@
+import type { OutboxEvent } from '../generated/prisma/client';
 import {
   BadRequestException,
   ConflictException,
@@ -313,30 +314,58 @@ export class MessageService {
       });
     }
 
-    await this.prisma.message.updateMany({
-      where: {
-        id: messageId,
-        status: {
-          in: [MessageStatus.SENT, MessageStatus.DELIVERED],
+    const result = await this.prisma.$transaction(async (tx) => {
+      const updateResult = await tx.message.updateMany({
+        where: {
+          id: messageId,
+          status: {
+            in: [MessageStatus.SENT, MessageStatus.DELIVERED],
+          },
         },
-      },
-      data: {
-        status: MessageStatus.READ,
-      },
-    });
-
-    const updatedMessage = await this.prisma.message.findUnique({
-      where: { id: messageId },
-    });
-
-    if (!updatedMessage) {
-      throw new NotFoundException({
-        message: 'Message not found',
-        errorCode: 'MESSAGE_NOT_FOUND',
+        data: {
+          status: MessageStatus.READ,
+        },
       });
-    }
+      const updatedMessage = await tx.message.findUnique({
+        where: { id: messageId },
+      });
 
-    return updatedMessage;
+      if (!updatedMessage) {
+        throw new NotFoundException({
+          message: 'Message not found',
+          errorCode: 'MESSAGE_NOT_FOUND',
+        });
+      }
+
+      if (updateResult.count > 0) {
+        const eventId = randomUUID();
+
+        await tx.outboxEvent.create({
+          data: {
+            id: eventId,
+            eventType: 'MessageRead',
+            aggregateId: updatedMessage.id,
+            payload: {
+              eventId,
+              eventType: 'MessageRead',
+              aggregateId: updatedMessage.id,
+              occurredAt: new Date().toISOString(),
+              data: {
+                id: updatedMessage.id,
+                conversationId: updatedMessage.conversationId,
+                senderId: updatedMessage.senderId,
+                readerId: callerId,
+                status: updatedMessage.status,
+              },
+            },
+          },
+        });
+      }
+
+      return updatedMessage;
+    });
+
+    return result;
   }
 
   async editMessage(
