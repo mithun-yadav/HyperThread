@@ -232,7 +232,6 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @ConnectedSocket() client: Socket,
     @MessageBody(new ParseUUIDPipe()) messageId: string,
   ) {
-    console.log('ACKNOWLEDGE READ RECEIVED:', messageId);
     if (!client.data.userId) {
       throw new WsException({
         errorCode: 'UNAUTHORIZED',
@@ -245,16 +244,12 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         client.data.userId,
       );
 
-      console.log('READ ACK SERVICE RESULT:', message);
-
       this.server.to(message.conversationId).emit('messageRead', {
         messageId: message.id,
         conversationId: message.conversationId,
         senderId: message.senderId,
         status: message.status,
       });
-
-      console.log('READ ACK RESPONSE SENT');
 
       return {
         event: 'readAcknowledged',
