@@ -90,7 +90,6 @@ export class MessageService {
         created: true,
       };
     } catch (error) {
-      console.error('[sendMessage] Original error:', error);
       if (
         error instanceof Prisma.PrismaClientKnownRequestError &&
         error.code === 'P2002'
