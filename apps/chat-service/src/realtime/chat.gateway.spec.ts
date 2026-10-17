@@ -11,6 +11,7 @@ describe('ChatGateway', () => {
   let gateway: ChatGateway;
 
   const messageService = {
+    sendMessage: jest.fn(),
     acknowledgeDelivery: jest.fn(),
     acknowledgeRead: jest.fn(),
     checkMembership: jest.fn(),
@@ -18,6 +19,7 @@ describe('ChatGateway', () => {
 
   const redisService = {
     refreshSocketPresence: jest.fn(),
+    consumeRateLimit: jest.fn(),
   } as unknown as RedisService;
   const jwtService = {} as JwtService;
   const configService = {} as ConfigService;
@@ -144,6 +146,34 @@ describe('ChatGateway', () => {
         errorCode: 'UNAUTHORIZED',
       },
     });
+  });
+
+  it('rejects messages when the rate limit is exceeded', async () => {
+    const client = {
+      data: { userId: 'user-1' },
+    } as unknown as Socket;
+
+    (redisService.consumeRateLimit as jest.Mock).mockResolvedValueOnce(false);
+
+    await expect(
+      gateway.handleSendMessage(client, {
+        conversationId: 'decdaa67-4c8c-4c65-964d-e01482a6cd49',
+        content: 'Hello',
+        idempotencyKey: 'test-key',
+      }),
+    ).rejects.toMatchObject({
+      error: {
+        errorCode: 'RATE_LIMIT_EXCEEDED',
+      },
+    });
+
+    expect(redisService.consumeRateLimit).toHaveBeenCalledWith(
+      'rate-limit:ws:send-message:user-1',
+      10,
+      60,
+    );
+
+    expect(messageService.sendMessage).not.toHaveBeenCalled();
   });
 
   it('rejects an unauthenticated heartbeat', async () => {
@@ -357,5 +387,44 @@ describe('ChatGateway', () => {
     });
 
     expect(client.to).not.toHaveBeenCalled();
+  });
+
+  it('disconnects a socket with a token signed using an unsupported algorithm', async () => {
+    const realJwtService = new JwtService({
+      secret: 'test-secret',
+      signOptions: { algorithm: 'HS384' },
+    });
+
+    const realConfigService = {
+      getOrThrow: jest.fn().mockReturnValue('test-secret'),
+    } as unknown as ConfigService;
+
+    const realGateway = new ChatGateway(
+      realJwtService,
+      realConfigService,
+      messageService as unknown as MessageService,
+      redisService,
+      {
+        registerMessageEditedHandler: jest.fn(),
+        emitMessageEdited: jest.fn(),
+        registerMessageDeleteHandler: jest.fn(),
+        emitMessageDeleted: jest.fn(),
+      } as unknown as MessageEventsService,
+    );
+
+    const token = realJwtService.sign({ sub: 'user-1' });
+    const disconnect = jest.fn();
+
+    const client = {
+      handshake: { auth: { token } },
+      disconnect,
+      data: {},
+      id: 'socket-1',
+    } as unknown as Socket;
+
+    await realGateway.handleConnection(client);
+
+    expect(disconnect).toHaveBeenCalled();
+    expect(client.data.userId).toBeUndefined();
   });
 });

@@ -107,4 +107,32 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
 
     return hasActiveSocket;
   }
+
+  async consumeRateLimit(
+    key: string,
+    limit: number,
+    windowSeconds: number,
+  ): Promise<boolean> {
+    const result = await this.client.eval(
+      `
+      local current = redis.call('INCR', KEYS[1])
+
+      if current == 1 then
+        redis.call('EXPIRE', KEYS[1], ARGV[1])
+      end
+
+      if current > tonumber(ARGV[2]) then
+        return 0
+      end
+
+      return 1 
+      `,
+      1,
+      key,
+      windowSeconds,
+      limit,
+    );
+
+    return result === 1;
+  }
 }

@@ -28,7 +28,19 @@ import { MessageEventsService } from '../message/message-events.service';
 @Injectable()
 @WebSocketGateway({
   cors: {
-    origin: ['http://localhost:5000'],
+    origin: (origin, callback) => {
+      const allowedOrigins = (process.env.CORS_ORIGINS ?? '')
+        .split(',')
+        .map((value) => value.trim())
+        .filter(Boolean);
+
+      if (!origin || allowedOrigins.includes(origin)) {
+        callback(null, true);
+        return;
+      }
+
+      callback(new Error('Origin not allowed by CORS'), false);
+    },
     credentials: true,
   },
 })
@@ -74,7 +86,18 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     try {
       const payload = this.jwtService.verify(token, {
         secret: this.configService.getOrThrow<string>('JWT_ACCESS_SECRET'),
+        algorithms: ['HS256'],
       });
+
+      if (
+        !payload ||
+        typeof payload !== 'object' ||
+        typeof payload.sub !== 'string' ||
+        payload.sub.trim().length === 0
+      ) {
+        client.disconnect();
+        return;
+      }
 
       client.data.userId = payload.sub;
 
@@ -142,12 +165,26 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
     let result;
     try {
+      const allowed = await this.redisService.consumeRateLimit(
+        `rate-limit:ws:send-message:${client.data.userId}`,
+        10,
+        60,
+      );
+      if (!allowed) {
+        throw new WsException({
+          errorCode: 'RATE_LIMIT_EXCEEDED',
+          message: 'Too many messages. Try again later.',
+        });
+      }
       result = await this.messageService.sendMessage(
         dto.conversationId,
         client.data.userId,
         dto,
       );
     } catch (error) {
+      if (error instanceof WsException) {
+        throw error;
+      }
       if (error instanceof NotFoundException) {
         throw new WsException({
           errorCode: 'CONVERSATION_NOT_FOUND',
@@ -293,7 +330,6 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @SubscribeMessage('heartbeat')
   async handleHeartbeat(@ConnectedSocket() client: Socket) {
     try {
-      console.log('HEARTBEAT RECEIVED:', client.id);
       if (!client.data.userId) {
         throw new WsException({
           errorCode: 'UNAUTHORIZED',

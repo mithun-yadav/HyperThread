@@ -35,7 +35,21 @@ export class JwtAuthGuard implements CanActivate {
     try {
       const payload = this.jwtService.verify(token, {
         secret: this.configService.getOrThrow<string>('JWT_ACCESS_SECRET'),
+        algorithms: ['HS256'],
       });
+
+      if (
+        !payload ||
+        typeof payload !== 'object' ||
+        typeof payload.sub !== 'string' ||
+        payload.sub.trim().length === 0
+      ) {
+        throw new UnauthorizedException({
+          message: 'Invalid or expired access token',
+          errorCode: 'AUTH_INVALID_ACCESS_TOKEN',
+        });
+      }
+
       request.user = payload;
 
       return true;

@@ -2,14 +2,26 @@ import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { ConfigService } from '@nestjs/config';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
-import { ValidationPipe } from '@nestjs/common';
+import { ValidationPipe, BadRequestException } from '@nestjs/common';
 import { Logger } from 'nestjs-pino';
-import { WsException } from '@nestjs/websockets';
+import helmet from 'helmet';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
   app.enableShutdownHooks();
+  app.use(helmet());
   const configService = app.get(ConfigService);
+
+  const corsOrigins = configService
+    .getOrThrow<string>('CORS_ORIGINS')
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+
+  app.enableCors({
+    origin: corsOrigins,
+    credentials: true,
+  });
 
   app.useGlobalPipes(
     new ValidationPipe({
@@ -17,7 +29,7 @@ async function bootstrap() {
       forbidNonWhitelisted: true,
       transform: true,
       exceptionFactory: () =>
-        new WsException({
+        new BadRequestException({
           errorCode: 'VALIDATION_ERROR',
           message: 'Invalid request payload',
         }),

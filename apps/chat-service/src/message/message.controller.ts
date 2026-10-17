@@ -18,6 +18,7 @@ import { MessageService } from './message.service';
 import { SendMessageDto } from '../conversations/dto/send-message.dto';
 import { EditMessageDto } from '../conversations/dto/edit-message.dto';
 import { MessageEventsService } from './message-events.service';
+import { Throttle } from '@nestjs/throttler';
 
 @Controller('conversations/:conversationId/messages')
 @UseGuards(JwtAuthGuard)
@@ -26,7 +27,7 @@ export class MessageController {
     private readonly messageService: MessageService,
     private readonly messageEventsService: MessageEventsService,
   ) {}
-
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @Post()
   async sendMessage(
     @Param('conversationId', new ParseUUIDPipe()) conversationId: string,

@@ -13,6 +13,8 @@ import { MessageModule } from './message/message.module';
 import { RealtimeModule } from './realtime/realtime.module';
 import { RedisModule } from './redis/redis.module';
 import { KafkaModule } from './kafka/kafka.module';
+import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
+import { APP_GUARD } from '@nestjs/core';
 
 @Module({
   imports: [
@@ -20,6 +22,12 @@ import { KafkaModule } from './kafka/kafka.module';
       isGlobal: true,
       validationSchema: envValidationSchema,
     }),
+    ThrottlerModule.forRoot([
+      {
+        ttl: 60_000,
+        limit: 100,
+      },
+    ]),
     RedisModule,
     KafkaModule,
     HealthModule,
@@ -64,6 +72,12 @@ import { KafkaModule } from './kafka/kafka.module';
     }),
   ],
   controllers: [AppController],
-  providers: [AppService],
+  providers: [
+    AppService,
+    {
+      provide: APP_GUARD,
+      useClass: ThrottlerGuard,
+    },
+  ],
 })
 export class AppModule {}

@@ -140,6 +140,7 @@ export class AuthService {
       {
         secret: this.configService.getOrThrow<string>('JWT_ACCESS_SECRET'),
         expiresIn: '15m',
+        algorithm: 'HS256',
       },
     );
 
@@ -198,6 +199,7 @@ export class AuthService {
         sessionId: string;
       }>(refreshToken, {
         secret: this.configService.getOrThrow<string>('JWT_REFRESH_SECRET'),
+        algorithms: ['HS256'],
       });
     } catch {
       throw new UnauthorizedException({
@@ -253,7 +255,8 @@ export class AuthService {
       },
       {
         secret: this.configService.getOrThrow<string>('JWT_ACCESS_SECRET'),
-        expiresIn: '15m'
+        expiresIn: '15m',
+        algorithm: 'HS256',
       },
     );
     const newRefreshToken = this.jwtService.sign(

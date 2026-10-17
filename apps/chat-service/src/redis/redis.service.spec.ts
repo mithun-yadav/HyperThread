@@ -148,4 +148,36 @@ describe('RedisService presence', () => {
       'socket-1',
     );
   });
+
+  it('allows a request within the rate limit', async () => {
+    redis.eval.mockResolvedValueOnce(1);
+
+    await expect(
+      service.consumeRateLimit('rate-limit:test:user-1', 10, 60),
+    ).resolves.toBe(true);
+
+    expect(redis.eval).toHaveBeenCalledWith(
+      expect.stringContaining("redis.call('INCR', KEYS[1])"),
+      1,
+      'rate-limit:test:user-1',
+      60,
+      10,
+    );
+  });
+
+  it('rejects a request exceeding the rate limit', async () => {
+    redis.eval.mockResolvedValueOnce(0);
+
+    await expect(
+      service.consumeRateLimit('rate-limit:test:user-1', 10, 60),
+    ).resolves.toBe(false);
+  });
+
+  it('propagates Redis errors instead of bypassing the rate limit', async () => {
+    redis.eval.mockRejectedValueOnce(new Error('Redis unavailable'));
+
+    await expect(
+      service.consumeRateLimit('rate-limit:test:user-1', 10, 60),
+    ).rejects.toThrow('Redis unavailable');
+  });
 });
