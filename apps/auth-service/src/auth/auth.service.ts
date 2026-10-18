@@ -10,6 +10,7 @@ import { Prisma } from '../generated/prisma/client';
 import { LoginDto } from './dto/login.dto';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
+import { randomUUID } from 'crypto';
 
 @Injectable()
 export class AuthService {
@@ -159,6 +160,7 @@ export class AuthService {
       {
         sub: identity.userId,
         sessionId: session.id,
+        jti: randomUUID(),
       },
       {
         secret: this.configService.getOrThrow<string>('JWT_REFRESH_SECRET'),
@@ -263,10 +265,12 @@ export class AuthService {
       {
         sub: payload.sub,
         sessionId: payload.sessionId,
+        jti: randomUUID(),
       },
       {
         secret: this.configService.getOrThrow<string>('JWT_REFRESH_SECRET'),
         expiresIn: '7d',
+        algorithm: 'HS256',
       },
     );
 
