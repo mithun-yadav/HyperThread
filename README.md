@@ -79,21 +79,26 @@ Each service expects its own `.env` file. Use the existing local environment fil
 
 ```env
 PORT=4000
-DATABASE_URL=postgresql://USER:PASSWORD@localhost:5435/DATABASE
+DATABASE_URL=postgresql://hyperthread:hyperthread_dev_password@localhost:5435/hyperthread
 NODE_ENV=development
 FRONTEND_URL=http://localhost:5000
-JWT_ACCESS_SECRET=replace-with-at-least-32-characters
-JWT_REFRESH_SECRET=replace-with-at-least-32-characters
+JWT_ACCESS_SECRET=replace-with-a-random-secret-at-least-32-characters
+JWT_REFRESH_SECRET=replace-with-a-different-random-secret-at-least-32-characters
+INTERNAL_API_KEY=replace-with-a-random-api-key-at-least-32-characters
 ```
 
 `apps/chat-service/.env`
 
 ```env
 PORT=4001
-DATABASE_URL=postgresql://USER:PASSWORD@localhost:5435/DATABASE
+DATABASE_URL=postgresql://hyperthread:hyperthread_dev_password@localhost:5435/hyperthread
 NODE_ENV=development
-JWT_ACCESS_SECRET=replace-with-the-same-access-secret-used-by-auth-service
+JWT_ACCESS_SECRET=use-the-same-access-secret-as-the-auth-service
 REDIS_URL=redis://localhost:6379
+INTERNAL_API_KEY=use-the-same-internal-api-key-as-the-auth-service
+AUTH_SERVICE_URL=http://localhost:4000
+KAFKA_BROKERS=localhost:9092
+CORS_ORIGINS=http://localhost:5000
 ```
 
 ### Run database migrations

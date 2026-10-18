@@ -1,4 +1,3 @@
-import { join } from '@prisma/client/runtime/client';
 import Joi from 'joi';
 
 export const envValidationSchema = Joi.object({

@@ -1,7 +1,6 @@
 import { UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
-import { sign } from 'jsonwebtoken';
 import { AuthService } from './auth.service';
 import { PrismaService } from '../prisma/prisma.service';
 

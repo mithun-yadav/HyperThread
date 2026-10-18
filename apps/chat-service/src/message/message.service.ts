@@ -1,4 +1,3 @@
-import type { OutboxEvent } from '../generated/prisma/client';
 import {
   BadRequestException,
   ConflictException,

@@ -56,7 +56,10 @@ export class KafkaService implements OnModuleInit, OnModuleDestroy {
         ],
       });
     } catch (error) {
-      this.logger.error(`Failed to publish event to topic "${topic}"`);
+      this.logger.error(
+        `Failed to publish event to topic "${topic}"`,
+        error instanceof Error ? error.stack : String(error),
+      );
       throw new ServiceUnavailableException({
         message: 'Event publishing failed',
         errorCode: 'EVENT_PUBLISH_FAILED',
