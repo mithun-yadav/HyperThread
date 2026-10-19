@@ -13,6 +13,7 @@ import {
 } from '../generated/prisma/client';
 import { ConversationService } from './conversation/conversations.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { ConversationRoomService } from '../realtime/conversation-room.service';
 
 describe('ConversationService', () => {
   let service: ConversationService;
@@ -63,6 +64,13 @@ describe('ConversationService', () => {
           provide: AuthUserClientService,
           useValue: {
             validateUser: jest.fn().mockResolvedValue(undefined),
+          },
+        },
+        {
+          provide: ConversationRoomService,
+          useValue: {
+            registerServer: jest.fn(),
+            removeUserFromConversation: jest.fn().mockResolvedValue(undefined),
           },
         },
       ],

@@ -15,12 +15,14 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { CreateGroupConversationDto } from '../dto/create-group-conversation.dto';
 import { AuthUserClientService } from '../../auth/auth-user-client.service';
 import { randomUUID } from 'crypto';
+import { ConversationRoomService } from '../../realtime/conversation-room.service';
 
 @Injectable()
 export class ConversationService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly authUserClient: AuthUserClientService,
+    private readonly conversationRoomService: ConversationRoomService,
   ) {}
   async createDirect(callerId: string, dto: CreateDirectConversationDto) {
     const recipientId = dto.recipientId;
@@ -314,6 +316,11 @@ export class ConversationService {
       },
     });
 
+    await this.conversationRoomService.removeUserFromConversation(
+      conversationId,
+      userId,
+    );
+
     return {
       message: 'Member removed successfully',
     };
@@ -388,6 +395,10 @@ export class ConversationService {
         },
       });
     });
+    await this.conversationRoomService.removeUserFromConversation(
+      conversationId,
+      callerId,
+    );
     return {
       message: 'You left the group successfully',
     };

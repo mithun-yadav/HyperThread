@@ -6,9 +6,14 @@ import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { Socket, Server } from 'socket.io';
 import { MessageEventsService } from '../message/message-events.service';
+import { ConversationRoomService } from './conversation-room.service';
 
 describe('ChatGateway', () => {
   let gateway: ChatGateway;
+
+  let messageEditedHandler: (conversationId: string, message: unknown) => void;
+
+  let messageDeleteHandler: (conversationId: string, message: unknown) => void;
 
   const messageService = {
     sendMessage: jest.fn(),
@@ -29,13 +34,25 @@ describe('ChatGateway', () => {
     emit: jest.fn(),
   };
 
+  const emitToConversationMembers = jest.fn().mockResolvedValue(undefined);
+
+  const conversationRoomService = {
+    registerServer: jest.fn(),
+    removeUserFromConversation: jest.fn(),
+    emitToConversationMembers,
+  } as unknown as ConversationRoomService;
+
   beforeEach(() => {
     jest.clearAllMocks();
 
     const messageEventsService = {
-      registerMessageEditedHandler: jest.fn(),
+      registerMessageEditedHandler: jest.fn((handler) => {
+        messageEditedHandler = handler;
+      }),
       emitMessageEdited: jest.fn(),
-      registerMessageDeleteHandler: jest.fn(),
+      registerMessageDeleteHandler: jest.fn((handler) => {
+        messageDeleteHandler = handler;
+      }),
       emitMessageDeleted: jest.fn(),
     } as unknown as MessageEventsService;
 
@@ -45,6 +62,7 @@ describe('ChatGateway', () => {
       messageService as unknown as MessageService,
       redisService,
       messageEventsService,
+      conversationRoomService,
     );
 
     gateway.server = server as unknown as Server;
@@ -71,8 +89,9 @@ describe('ChatGateway', () => {
       client.data.userId,
     );
 
-    expect(server.to).toHaveBeenCalledWith(message.conversationId);
-    expect(server.emit).toHaveBeenCalledWith('messageDelivered', {
+    expect(
+      conversationRoomService.emitToConversationMembers,
+    ).toHaveBeenCalledWith(message.conversationId, 'messageDelivered', {
       messageId: message.id,
       conversationId: message.conversationId,
       senderId: message.senderId,
@@ -231,8 +250,9 @@ describe('ChatGateway', () => {
       client.data.userId,
     );
 
-    expect(server.to).toHaveBeenCalledWith(message.conversationId);
-    expect(server.emit).toHaveBeenCalledWith('messageRead', {
+    expect(
+      conversationRoomService.emitToConversationMembers,
+    ).toHaveBeenCalledWith(message.conversationId, 'messageRead', {
       messageId: message.id,
       conversationId: message.conversationId,
       senderId: message.senderId,
@@ -410,6 +430,7 @@ describe('ChatGateway', () => {
         registerMessageDeleteHandler: jest.fn(),
         emitMessageDeleted: jest.fn(),
       } as unknown as MessageEventsService,
+      conversationRoomService,
     );
 
     const token = realJwtService.sign({ sub: 'user-1' });
@@ -426,5 +447,50 @@ describe('ChatGateway', () => {
 
     expect(disconnect).toHaveBeenCalled();
     expect(client.data.userId).toBeUndefined();
+  });
+  it('logs a failed messageEdited broadcast', async () => {
+    const conversationId = 'decdaa67-4c8c-4c65-964d-e01482a6cd49';
+    const message = { id: 'message-1' };
+    const error = new Error('Broadcast failed');
+
+    emitToConversationMembers.mockRejectedValueOnce(error);
+
+    const loggerError = jest
+      .spyOn((gateway as any).logger, 'error')
+      .mockImplementation(() => undefined);
+
+    messageEditedHandler(conversationId, message);
+
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    expect(loggerError).toHaveBeenCalledWith(
+      `Failed to broadcast messageEdited for conversation ${conversationId}`,
+      error.stack,
+    );
+
+    loggerError.mockRestore();
+  });
+
+  it('logs a failed messageDeleted broadcast', async () => {
+    const conversationId = 'decdaa67-4c8c-4c65-964d-e01482a6cd49';
+    const message = { id: 'message-2' };
+    const error = new Error('Broadcast failed');
+
+    emitToConversationMembers.mockRejectedValueOnce(error);
+
+    const loggerError = jest
+      .spyOn((gateway as any).logger, 'error')
+      .mockImplementation(() => undefined);
+
+    messageDeleteHandler(conversationId, message);
+
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    expect(loggerError).toHaveBeenCalledWith(
+      `Failed to broadcast messageDeleted for conversation ${conversationId}`,
+      error.stack,
+    );
+
+    loggerError.mockRestore();
   });
 });

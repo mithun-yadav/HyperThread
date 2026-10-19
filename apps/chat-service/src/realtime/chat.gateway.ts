@@ -11,11 +11,13 @@ import {
   ConnectedSocket,
   WsException,
   WebSocketServer,
+  OnGatewayInit,
 } from '@nestjs/websockets';
 import {
   BadRequestException,
   ConflictException,
   Injectable,
+  Logger,
   NotFoundException,
   ParseUUIDPipe,
   UsePipes,
@@ -24,6 +26,7 @@ import { MessageService } from '../message/message.service';
 import { SendSocketMessageDto } from '../conversations/dto/send-message.dto';
 import { WsValidationPipe } from '../common/pipes/ws-validation.pipe';
 import { MessageEventsService } from '../message/message-events.service';
+import { ConversationRoomService } from './conversation-room.service';
 
 @Injectable()
 @WebSocketGateway({
@@ -44,7 +47,9 @@ import { MessageEventsService } from '../message/message-events.service';
     credentials: true,
   },
 })
-export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
+export class ChatGateway
+  implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect
+{
   @WebSocketServer()
   server: Server;
   constructor(
@@ -53,26 +58,68 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     private readonly messageService: MessageService,
     private readonly redisService: RedisService,
     private readonly messageEventsService: MessageEventsService,
+    private readonly conversationRoomService: ConversationRoomService,
+    private readonly logger = new Logger(ChatGateway.name),
   ) {
     this.messageEventsService.registerMessageEditedHandler(
       (conversationId, message) => {
-        this.emitMessageEdited(conversationId, message);
+        void this.emitMessageEdited(conversationId, message).catch(
+          (error: unknown) => {
+            this.logger.error(
+              `Failed to broadcast messageEdited for conversation ${conversationId}`,
+              error instanceof Error ? error.stack : String(error),
+            );
+          },
+        );
       },
     );
 
     this.messageEventsService.registerMessageDeleteHandler(
       (conversationId, message) => {
-        this.emitMessageDeleted(conversationId, message);
+        void this.emitMessageDeleted(conversationId, message).catch(
+          (error: unknown) => {
+            this.logger.error(
+              `Failed to broadcast messageDeleted for conversation ${conversationId}`,
+              error instanceof Error ? error.stack : String(error),
+            );
+          },
+        );
       },
     );
   }
 
-  emitMessageEdited(conversationId: string, message: unknown) {
-    this.server.to(conversationId).emit('messageEdited', message);
+  // emitMessageEdited(conversationId: string, message: unknown) {
+  //   this.server.to(conversationId).emit('messageEdited', message);
+  // }
+
+  async emitMessageEdited(
+    conversationId: string,
+    message: unknown,
+  ): Promise<void> {
+    await this.conversationRoomService.emitToConversationMembers(
+      conversationId,
+      'messageEdited',
+      message,
+    );
   }
 
-  emitMessageDeleted(conversationId: string, message: unknown) {
-    this.server.to(conversationId).emit('messageDeleted', message);
+  // emitMessageDeleted(conversationId: string, message: unknown) {
+  //   this.server.to(conversationId).emit('messageDeleted', message);
+  // }
+
+  async emitMessageDeleted(
+    conversationId: string,
+    message: unknown,
+  ): Promise<void> {
+    await this.conversationRoomService.emitToConversationMembers(
+      conversationId,
+      'messageDeleted',
+      message,
+    );
+  }
+
+  afterInit(server: Server): void {
+    this.conversationRoomService.registerServer(server);
   }
 
   async handleConnection(client: Socket) {
@@ -120,10 +167,6 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @ConnectedSocket() client: Socket,
     @MessageBody(new ParseUUIDPipe()) conversationId: string,
   ) {
-    // console.log('🔎 SOCKET JOIN');
-    // console.log('conversationId:', conversationId);
-    // console.log('socket userId:', client.data.userId);
-
     if (!client.data.userId) {
       throw new WsException({
         errorCode: 'UNAUTHORIZED',
@@ -204,9 +247,19 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
 
     if (result.created) {
-      this.server.to(dto.conversationId).emit('newMessage', result.message);
+      try {
+        await this.conversationRoomService.emitToConversationMembers(
+          dto.conversationId,
+          'newMessage',
+          result.message,
+        );
+      } catch (error) {
+        this.logger.error(
+          `Failed to broadcast newMessage for conversation ${dto.conversationId} `,
+          error instanceof Error ? error.stack : String(error),
+        );
+      }
     }
-
     return result.message;
   }
 
@@ -221,27 +274,14 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         message: 'Unauthorized',
       });
     }
+
+    let message;
+
     try {
-      const message = await this.messageService.acknowledgeDelivery(
+      message = await this.messageService.acknowledgeDelivery(
         messageId,
         client.data.userId,
       );
-
-      // Notify client in the conversation room.
-      this.server.to(message.conversationId).emit('messageDelivered', {
-        messageId: message.id,
-        conversationId: message.conversationId,
-        senderId: message.senderId,
-        status: message.status,
-      });
-
-      return {
-        event: 'deliveryAcknowledged',
-        data: {
-          messageId: message.id,
-          status: message.status,
-        },
-      };
     } catch (error) {
       if (error instanceof NotFoundException) {
         throw new WsException({
@@ -262,6 +302,32 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         message: 'could not acknowledge message delivery',
       });
     }
+
+    try {
+      await this.conversationRoomService.emitToConversationMembers(
+        message.conversationId,
+        'messageDelivered',
+        {
+          messageId: message.id,
+          conversationId: message.conversationId,
+          senderId: message.senderId,
+          status: message.status,
+        },
+      );
+    } catch (error) {
+      this.logger.error(
+        `Failed to broadcast messageDelivered for conversation ${message.conversationId}`,
+        error instanceof Error ? error.stack : String(error),
+      );
+    }
+
+    return {
+      event: 'deliveryAcknowledged',
+      data: {
+        messageId: message.id,
+        status: message.status,
+      },
+    };
   }
 
   @SubscribeMessage('acknowledgeRead')
@@ -275,26 +341,14 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         message: 'Unauthorized',
       });
     }
+
+    let message;
+
     try {
-      const message = await this.messageService.acknowledgeRead(
+      message = await this.messageService.acknowledgeRead(
         messageId,
         client.data.userId,
       );
-
-      this.server.to(message.conversationId).emit('messageRead', {
-        messageId: message.id,
-        conversationId: message.conversationId,
-        senderId: message.senderId,
-        status: message.status,
-      });
-
-      return {
-        event: 'readAcknowledged',
-        data: {
-          messageId: message.id,
-          status: message.status,
-        },
-      };
     } catch (error) {
       if (
         error instanceof BadRequestException &&
@@ -306,6 +360,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
           message: 'Read acknowledgement is only supported for direct chats',
         });
       }
+
       if (error instanceof NotFoundException) {
         throw new WsException({
           errorCode: 'MESSAGE_NOT_FOUND',
@@ -325,6 +380,32 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         message: 'Could not acknowledge message read status',
       });
     }
+
+    try {
+      await this.conversationRoomService.emitToConversationMembers(
+        message.conversationId,
+        'messageRead',
+        {
+          messageId: message.id,
+          conversationId: message.conversationId,
+          senderId: message.senderId,
+          status: message.status,
+        },
+      );
+    } catch (error) {
+      this.logger.error(
+        `Failed to broadcast messageRead for conversation ${message.conversationId}`,
+        error instanceof Error ? error.stack : String(error),
+      );
+    }
+
+    return {
+      event: 'readAcknowledged',
+      data: {
+        messageId: message.id,
+        status: message.status,
+      },
+    };
   }
 
   @SubscribeMessage('heartbeat')
