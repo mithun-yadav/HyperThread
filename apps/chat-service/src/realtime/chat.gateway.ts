@@ -52,6 +52,7 @@ export class ChatGateway
 {
   @WebSocketServer()
   server: Server;
+  private readonly logger = new Logger(ChatGateway.name);
   constructor(
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
@@ -59,7 +60,6 @@ export class ChatGateway
     private readonly redisService: RedisService,
     private readonly messageEventsService: MessageEventsService,
     private readonly conversationRoomService: ConversationRoomService,
-    private readonly logger = new Logger(ChatGateway.name),
   ) {
     this.messageEventsService.registerMessageEditedHandler(
       (conversationId, message) => {

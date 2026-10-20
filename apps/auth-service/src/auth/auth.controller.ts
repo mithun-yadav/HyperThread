@@ -39,7 +39,13 @@ export class AuthController {
 
   @Post('refresh')
   @HttpCode(HttpStatus.OK)
-  refresh(@Body() refreshDto  : RefreshDto){
-    return this.authService.refresh(refreshDto.refreshToken)
+  refresh(@Body() refreshDto: RefreshDto) {
+    return this.authService.refresh(refreshDto.refreshToken);
+  }
+
+  @Post('logout')
+  @HttpCode(HttpStatus.OK)
+  logout(@Body() refreshDto: RefreshDto) {
+    return this.authService.logout(refreshDto.refreshToken);
   }
 }
